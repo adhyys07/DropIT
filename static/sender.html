@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>P2P File Share</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #2c3e50, #3498db);
+      height: 100vh;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 30px;
+      color: #fff;
+      max-width: 600px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    input, button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      font-size: 1rem;
+      border-radius: 10px;
+      border: none;
+      outline: none;
+    }
+    button {
+      background-color: #1abc9c;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #16a085;
+    }
+    .remove-single-btn {
+      width: auto;
+      padding: 2px 8px;
+      font-size: 1rem;
+      background: #e74c3c;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .file-row {
+      display: flex;
+      align-items: center;
+      margin: 2px 0;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>P2P File Share 🔐</h2>
+  <div class="filePreview" id="filePreview"></div>
+  <input type="file" id="fileInput" style="display: none;" multiple/>
+  <button id="removeBtn" style="display: none; margin-top:10px;">Remove All Files</button>
+  <button id="sendBtn" style="display: none; margin-top:10px;">Send File</button>
+  <button id="newInstanceBtn" style="margin-top:10px; display:none;">Start New Instance</button>
+  <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
+  <div id="progressContainer" style="display:none; margin-top:15px; background: rgba(255,255,255,0.3); border-radius: 10px; overflow: hidden; height: 20px;">
+    <div id="progressBar" style="height: 100%; width: 0%; background: #1abc9c; transition: width 0.3s;"></div>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+
+<script>
+  const socket = io();
+  let peer;
+  let isSender = false;
+  let selectedFiles = [];
+
+  function updateProgress(percent) {
+    const bar = document.getElementById('progressBar');
+    const container = document.getElementById('progressContainer');
+    container.style.display = 'block';
+    bar.style.width = percent + '%';
+
+    if (percent >= 100) {
+      setTimeout(() => {
+        container.style.display = 'none';
+        bar.style.width = '0%';
+      }, 1000);
+    }
+  }
+
+  function startSender() {
+    isSender = true;
+    peer = new SimplePeer({ initiator: true, trickle: false });
+
+    peer.on('signal', signal => {
+      socket.emit('register-offer', { signal });
+    });
+
+    socket.on('offer-registered', data => {
+      document.getElementById('connKeyDisplay').innerText = "Conn Key: " + data.connKey;
+      document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
+    });
+
+    socket.on('deliver-answer', signal => {
+      peer.signal(signal);
+      alert("✅ Connection established! You can now select and send files.");
+      document.getElementById('fileInput').style.display = "block";
+      document.getElementById('sendBtn').style.display = "block";
+      showFilePreview(); // Ensure Remove All button is shown/hidden correctly
+
+      // Remove the Conn Key and instructions
+      document.getElementById('connKeyDisplay').innerText = "";
+      // Remove the extra instructions paragraph if present
+      const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
+      if (nextElem && nextElem.tagName === "P" && nextElem.textContent.includes("Share this key")) {
+        nextElem.remove();
+      }
+
+      // Show the "Start New Instance" button and attach the reload event
+      document.getElementById('newInstanceBtn').style.display = "block";
+      document.getElementById('newInstanceBtn').onclick = () => location.reload();
+    });
+
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+      const newFiles = Array.from(e.target.files);
+      // Add only files that are not already in selectedFiles (by name & size) and limit to 25
+      newFiles.forEach(newFile => {
+        if (
+          !selectedFiles.some(f => f.name === newFile.name && f.size === newFile.size) &&
+          selectedFiles.length < 25
+        ) {
+          selectedFiles.push(newFile);
+        }
+      });
+      if (selectedFiles.length >= 25 && newFiles.length > 0) {
+        alert("You can select a maximum of 25 files.");
+      }
+      // Update the file input to reflect all selected files
+      const dt = new DataTransfer();
+      selectedFiles.forEach(f => dt.items.add(f));
+      document.getElementById('fileInput').files = dt.files;
+      showFilePreview();
+    });
+
+    document.getElementById('removeBtn').addEventListener('click', () => {
+      document.getElementById('fileInput').value = "";
+      selectedFiles = [];
+      showFilePreview();
+    });
+
+    document.getElementById('sendBtn').addEventListener('click', () => {
+      if (!selectedFiles.length) {
+        alert("Please select file(s) first.");
+        return;
+      }
+      if (!peer.connected) {
+        alert("Connection not established yet. Please wait for the receiver.");
+        return;
+      }
+      sendFiles(selectedFiles);
+    });
+  }
+
+  function sendFiles(files) {
+    const chunkSize = 64 * 1024;
+
+    function sendFile(index) {
+      if (index >= files.length) return;
+
+      const file = files[index];
+      const meta = { name: file.name, size: file.size, type: file.type };
+      peer.send(JSON.stringify({ type: 'file-meta', meta }));
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const buffer = e.target.result;
+        let offset = 0;
+        const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
+
+        function sendNextChunk() {
+          if (offset < buffer.byteLength) {
+            const chunk = buffer.slice(offset, offset + chunkSize);
+            peer.send(chunk);
+            offset += chunkSize;
+            const progress = Math.min(100, (offset / buffer.byteLength) * 100);
+            updateProgress(progress);
+            setTimeout(sendNextChunk, 10); // throttle sending
+          } else {
+            updateProgress(100); // complete
+            setTimeout(() => sendFile(index + 1), 200); // next file
+          }
+        }
+
+        sendNextChunk();
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    sendFile(0);
+  }
+
+  function showFilePreview() {
+    let previewDiv = document.getElementById('filePreview');
+    previewDiv.innerHTML = "";
+
+    // Show or hide "Remove All Files" button based on selection
+    const removeBtn = document.getElementById('removeBtn');
+    if (!selectedFiles || selectedFiles.length === 0) {
+      removeBtn.style.display = "none";
+      return;
+    } else {
+      removeBtn.style.display = "block";
+    }
+
+    const maxFiles = 5; // Show only 5 files in preview
+    for (let i = 0; i < Math.min(selectedFiles.length, maxFiles); i++) {
+      const file = selectedFiles[i];
+      const row = document.createElement('div');
+      row.className = 'file-row';
+
+      const span = document.createElement('span');
+      span.textContent = `📄 ${file.name}`;
+      row.appendChild(span);
+
+      // Remove button for each file
+      const removeBtnSingle = document.createElement('button');
+      removeBtnSingle.textContent = '❌';
+      removeBtnSingle.className = 'remove-single-btn';
+      removeBtnSingle.onclick = () => {
+        selectedFiles.splice(i, 1);
+        // Update the file input (reset and re-add remaining files)
+        const dt = new DataTransfer();
+        selectedFiles.forEach(f => dt.items.add(f));
+        document.getElementById('fileInput').files = dt.files;
+        showFilePreview();
+      };
+
+      row.appendChild(removeBtnSingle);
+      previewDiv.appendChild(row);
+    }
+
+    if (selectedFiles.length > maxFiles) {
+      const more = document.createElement('p');
+      more.textContent = `+${selectedFiles.length - maxFiles} more file(s)...`;
+      more.style.fontStyle = 'italic';
+      previewDiv.appendChild(more);
+    }
+  }
+
+  window.onload = startSender;
+</script>
+</body>
+</html>

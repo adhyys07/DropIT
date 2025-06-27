@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>P2P File Share</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #2c3e50, #3498db);
+      height: 100vh;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 30px;
+      color: #fff;
+      max-width: 600px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    input, button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 10px;
+      font-size: 1rem;
+      border-radius: 10px;
+      border: none;
+      outline: none;
+    }
+    button {
+      background-color: #1abc9c;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #16a085;
+    }
+    #receivedFiles a {
+      color: #1abc9c;
+      text-decoration: underline;
+      display: block;
+      margin-bottom: 6px;
+    }
+    #receivedFiles h4 {
+      margin-bottom: 8px;
+      margin-top: 0;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h2>P2P File Share 🔐</h2>
+  <div id="progressContainer" style="display:none; margin: 20px auto 0 auto; background: rgba(255,255,255,0.0); border-radius: 50%; width: 160px; height: 160px; position: relative;">
+    <svg id="circularProgress" width="160" height="160">
+      <circle cx="80" cy="80" r="74" stroke="#eee" stroke-width="12" fill="none"/>
+      <circle id="circularBar" cx="80" cy="80" r="74" stroke="#1abc9c" stroke-width="12" fill="none"
+        stroke-linecap="round"
+        stroke-dasharray="464.95571273128947"
+        stroke-dashoffset="464.95571273128947"
+        transform="rotate(-90 80 80)"/>
+    </svg>
+    <span id="circularPercent" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#1abc9c;font-weight:bold;font-size:1.1em;white-space:nowrap;"></span>
+  </div>
+  <div id="receivedFiles" style="margin-top:20px;"></div>
+  <input id="connKeyInput" placeholder="Enter 18-char Conn Key" />
+  <button onclick="startReceiver()">Start as Receiver</button>
+  <button id="disconnectBtn" style="margin-top:10px; display:none;">Disconnect & Start New</button>
+  <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
+  
+
+  
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+<script>
+  const socket = io();
+  let peer;
+  let isSender = false;
+  let receivedFiles = [];
+
+  function updateProgress(percent) {
+    // Circular progress
+    const container = document.getElementById('progressContainer');
+    container.style.display = 'block';
+
+    const circle = document.getElementById('circularBar');
+    const percentText = document.getElementById('circularPercent');
+    const radius = 74;
+    const circumference = 2 * Math.PI * radius;
+    if (circle) {
+      circle.style.strokeDasharray = circumference;
+      circle.style.strokeDashoffset = circumference - (percent / 100) * circumference;
+    }
+    if (percentText) {
+      percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
+    }
+
+    // Do not hide the progress circle after completion
+  }
+
+ function showReceivedFiles() {
+  const container = document.getElementById('receivedFiles');
+  container.innerHTML = "<h4>Received Files:</h4>";
+  if (receivedFiles.length === 0) {
+    container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
+    return;
+  }
+  const maxFiles = 5;
+  for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
+    const file = receivedFiles[i];
+    const link = document.createElement('a');
+    link.href = file.url;
+    link.download = file.name;
+    link.textContent = `📥 ${file.name}`;
+    container.appendChild(link);
+  }
+  if (receivedFiles.length > maxFiles) {
+    const more = document.createElement('p');
+    more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
+    more.style.fontStyle = 'italic';
+    more.style.color = '#eee';
+    container.appendChild(more);
+  }
+}
+
+  function startReceiver() {
+    isSender = false;
+    const connKey = document.getElementById('connKeyInput').value.trim();
+    if (connKey.length !== 18) return alert("❌ Invalid Conn Key");
+
+    peer = new SimplePeer({ initiator: false, trickle: false });
+
+    peer.on('signal', signal => {
+      socket.emit('send-answer', { signal });
+    });
+
+    socket.emit('fetch-offer', { connKey });
+
+    socket.on('deliver-offer', data => {
+      peer.signal(data.signal);
+    });
+
+    peer.on('connect', () => {
+      alert("✅ Connected! You can now receive files.");
+    });
+
+    let incomingChunks = [];
+    let incomingMeta = null;
+
+    peer.on('data', data => {
+      try {
+        const text = new TextDecoder().decode(data);
+        const parsed = JSON.parse(text);
+        if (parsed.type === 'file-meta') {
+          incomingMeta = parsed.meta;
+          incomingChunks = [];
+          return;
+        }
+      } catch (err) {}
+
+      if (incomingMeta) {
+        incomingChunks.push(data);
+
+        const receivedSize = incomingChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+        const percent = Math.min(100, (receivedSize / incomingMeta.size) * 100);
+        updateProgress(percent);
+
+        if (receivedSize >= incomingMeta.size) {
+          const blob = new Blob(incomingChunks, { type: incomingMeta.type });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = incomingMeta.name;
+          a.click();
+
+          // Save to receivedFiles and update UI
+          receivedFiles.push({ name: incomingMeta.name, url });
+          showReceivedFiles();
+
+          incomingChunks = [];
+          incomingMeta = null;
+        }
+      }
+    });
+    
+  }
+  document.getElementById('disconnectBtn').onclick = function() {
+  location.reload();
+};
+</script>
+</body>
+</html>
