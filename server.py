@@ -1,7 +1,7 @@
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO, emit
 import random, string
-
+import os
 app = Flask(__name__, static_folder='static')
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
@@ -38,4 +38,5 @@ def handle_answer(data):
     emit('deliver-answer', data['signal'], broadcast=True)
 
 if __name__ == '__main__':
-    socketio.run(app, port=5000)
+    port = int(os.environ.get("PORT", 5000))  # allow external hosting platforms to set port
+    socketio.run(app, host="0.0.0.0", port=port)
