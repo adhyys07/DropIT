@@ -2,7 +2,6 @@
 <html>
 <head>
   <script src="https://unpkg.com/html5-qrcode"></script>
-
   <title>P2P File Share</title>
   <style>
     body {
@@ -54,10 +53,28 @@
       margin-top: 0;
     }
     #qr-reader {
-  border-radius: 10px;
-  overflow: hidden;
+      border-radius: 10px;
+      overflow: hidden;
     }
-
+    /* Processing dialog */
+    #processingDialog {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(44,62,80,0.7);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    #processingDialog > div {
+      background: #fff;
+      color: #2c3e50;
+      padding: 30px 40px;
+      border-radius: 16px;
+      font-size: 1.3em;
+      font-weight: bold;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
   </style>
 </head>
 <body>
@@ -81,11 +98,12 @@
   <div id="qr-reader" style="width: 100%; margin-top: 15px; display: none;"></div>
   <button id="disconnectBtn" style="margin-top:10px; display:none;">Disconnect & Start New</button>
   <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
-  
-
-  
 </div>
 
+<!-- Processing dialog -->
+<div id="processingDialog">
+  <div>Processing...</div>
+</div>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 <script>
@@ -95,29 +113,38 @@
   let receivedFiles = [];
   let html5Qr;
 
-function scanQR() {
-  const qrRegion = document.getElementById('qr-reader');
-  qrRegion.style.display = 'block';
+  function showProcessingDialog() {
+    document.getElementById('processingDialog').style.display = 'flex';
+  }
+  function hideProcessingDialog() {
+    document.getElementById('processingDialog').style.display = 'none';
+  }
 
-  html5Qr = new Html5Qrcode("qr-reader");
-  const config = { fps: 10, qrbox: 250 };
+  function scanQR() {
+    const qrRegion = document.getElementById('qr-reader');
+    qrRegion.style.display = 'block';
 
-  html5Qr.start({ facingMode: "environment" }, config,
-    qrCodeMessage => {
-      html5Qr.stop().then(() => {
-        qrRegion.style.display = 'none';
-        document.getElementById('connKeyInput').value = qrCodeMessage.trim();
-        startReceiver();  // Auto-start receiver immediately after scanning
-      });
-    },
-    error => {
-      // Silent fail (do nothing)
-    }
-  ).catch(err => {
-    alert("Error starting camera: " + err);
-  });
-}
+    html5Qr = new Html5Qrcode("qr-reader");
+    const config = { fps: 10, qrbox: 250 };
 
+    html5Qr.start({ facingMode: "environment" }, config,
+      qrCodeMessage => {
+        html5Qr.stop().then(() => {
+          qrRegion.style.display = 'none';
+          document.getElementById('connKeyInput').value = qrCodeMessage.trim();
+          showProcessingDialog();
+          setTimeout(() => {
+            startReceiver();
+          }, 100);
+        });
+      },
+      error => {
+        // Silent fail (do nothing)
+      }
+    ).catch(err => {
+      alert("Error starting camera: " + err);
+    });
+  }
 
   function updateProgress(percent) {
     // Circular progress
@@ -135,39 +162,41 @@ function scanQR() {
     if (percentText) {
       percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
     }
-
     // Do not hide the progress circle after completion
   }
 
- function showReceivedFiles() {
-  const container = document.getElementById('receivedFiles');
-  container.innerHTML = "<h4>Received Files:</h4>";
-  if (receivedFiles.length === 0) {
-    container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
-    return;
+  function showReceivedFiles() {
+    const container = document.getElementById('receivedFiles');
+    container.innerHTML = "<h4>Received Files:</h4>";
+    if (receivedFiles.length === 0) {
+      container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
+      return;
+    }
+    const maxFiles = 5;
+    for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
+      const file = receivedFiles[i];
+      const link = document.createElement('a');
+      link.href = file.url;
+      link.download = file.name;
+      link.textContent = `📥 ${file.name}`;
+      container.appendChild(link);
+    }
+    if (receivedFiles.length > maxFiles) {
+      const more = document.createElement('p');
+      more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
+      more.style.fontStyle = 'italic';
+      more.style.color = '#eee';
+      container.appendChild(more);
+    }
   }
-  const maxFiles = 5;
-  for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
-    const file = receivedFiles[i];
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.download = file.name;
-    link.textContent = `📥 ${file.name}`;
-    container.appendChild(link);
-  }
-  if (receivedFiles.length > maxFiles) {
-    const more = document.createElement('p');
-    more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
-    more.style.fontStyle = 'italic';
-    more.style.color = '#eee';
-    container.appendChild(more);
-  }
-}
 
   function startReceiver() {
     isSender = false;
     const connKey = document.getElementById('connKeyInput').value.trim();
-    if (connKey.length !== 18) return alert("❌ Invalid Conn Key");
+    if (connKey.length !== 18) {
+      hideProcessingDialog();
+      return alert("❌ Invalid Conn Key");
+    }
 
     peer = new SimplePeer({ initiator: false, trickle: false });
 
@@ -182,7 +211,9 @@ function scanQR() {
     });
 
     peer.on('connect', () => {
+      hideProcessingDialog();
       alert("✅ Connected! You can now receive files.");
+      document.getElementById('disconnectBtn').style.display = "block";
     });
 
     let incomingChunks = [];
@@ -223,11 +254,10 @@ function scanQR() {
         }
       }
     });
-    
   }
   document.getElementById('disconnectBtn').onclick = function() {
-  location.reload();
-};
+    location.reload();
+  };
 </script>
 </body>
 </html>
