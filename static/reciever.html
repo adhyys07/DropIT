@@ -57,7 +57,7 @@
   border-radius: 10px;
   overflow: hidden;
     }
-    
+
   </style>
 </head>
 <body>
@@ -76,7 +76,7 @@
   </div>
   <div id="receivedFiles" style="margin-top:20px;"></div>
   <input id="connKeyInput" placeholder="Enter 18-char Conn Key" />
-  <button onclick="startReceiver()">Start as Receiver</button>
+  <button onclick="startReceiver()">Start receiving</button>
   <button onclick="scanQR()">📷 Scan QR</button>
   <div id="qr-reader" style="width: 100%; margin-top: 15px; display: none;"></div>
   <button id="disconnectBtn" style="margin-top:10px; display:none;">Disconnect & Start New</button>
@@ -107,7 +107,7 @@ function scanQR() {
       html5Qr.stop().then(() => {
         qrRegion.style.display = 'none';
         document.getElementById('connKeyInput').value = qrCodeMessage.trim();
-        startReceiver();  // Auto-start receiver
+        startReceiver();  // Auto-start receiver immediately after scanning
       });
     },
     error => {
