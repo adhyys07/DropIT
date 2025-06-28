@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <script src="https://cdn.jsdelivr.net/npm/qrious/dist/qrious.min.js"></script>
   <title>P2P File Share</title>
   <style>
     body {
@@ -62,6 +63,7 @@
 <body>
 <div class="container">
   <h2>P2P File Share 🔐</h2>
+  <canvas id="qrCanvas" style="margin-top: 10px; display: none;"></canvas>
   <div class="filePreview" id="filePreview"></div>
   <input type="file" id="fileInput" style="display: none;" multiple/>
   <button id="removeBtn" style="display: none; margin-top:10px;">Remove All Files</button>
@@ -100,13 +102,41 @@
     isSender = true;
     peer = new SimplePeer({ initiator: true, trickle: false });
 
+    // Show placeholder details instantly for faster feedback
     peer.on('signal', signal => {
+      if (signal && signal.type === "offer") {
+        document.getElementById('connKeyDisplay').innerText = "Generating Conn Key...";
+        // Remove any previous instructions to avoid duplicates
+        const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
+        if (!nextElem || !nextElem.textContent.includes("Share this key")) {
+          document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
+        }
+        const qrCanvas = document.getElementById('qrCanvas');
+        qrCanvas.style.display = "block";
+        new QRious({
+          element: qrCanvas,
+          value: "Generating...",
+          size: 200
+        });
+      }
       socket.emit('register-offer', { signal });
     });
 
     socket.on('offer-registered', data => {
+      // Update the connection key and QR code with the real value from the server
       document.getElementById('connKeyDisplay').innerText = "Conn Key: " + data.connKey;
-      document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
+      // Remove any previous instructions to avoid duplicates
+      const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
+      if (!nextElem || !nextElem.textContent.includes("Share this key")) {
+        document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
+      }
+      const qrCanvas = document.getElementById('qrCanvas');
+      qrCanvas.style.display = "block";
+      new QRious({
+        element: qrCanvas,
+        value: data.connKey,
+        size: 200
+      });
     });
 
     socket.on('deliver-answer', signal => {
@@ -114,16 +144,16 @@
       alert("✅ Connection established! You can now select and send files.");
       document.getElementById('fileInput').style.display = "block";
       document.getElementById('sendBtn').style.display = "block";
-      showFilePreview(); // Ensure Remove All button is shown/hidden correctly
+      showFilePreview();
 
       // Remove the Conn Key and instructions
       document.getElementById('connKeyDisplay').innerText = "";
-      // Remove the extra instructions paragraph if present
       const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
       if (nextElem && nextElem.tagName === "P" && nextElem.textContent.includes("Share this key")) {
         nextElem.remove();
       }
-
+      // Hide the QR code after connection is established
+      document.getElementById('qrCanvas').style.display = "none";
       // Show the "Start New Instance" button and attach the reload event
       document.getElementById('newInstanceBtn').style.display = "block";
       document.getElementById('newInstanceBtn').onclick = () => location.reload();
