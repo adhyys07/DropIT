@@ -4,27 +4,49 @@
   <script src="https://cdn.jsdelivr.net/npm/qrious/dist/qrious.min.js"></script>
   <title>P2P File Share</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
     body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #2c3e50, #3498db);
+      font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+      background: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
       height: 100vh;
       margin: 0;
       display: flex;
       justify-content: center;
       align-items: center;
+      color: #00ffae;
+      letter-spacing: 0.5px;
+      user-select: none;
     }
     .container {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: rgba(20, 30, 40, 0.95);
+      border: 2px solid #00ffae44;
       border-radius: 20px;
-      padding: 30px;
-      color: #fff;
+      padding: 32px 36px 32px 36px;
+      color: #00ffae;
       max-width: 600px;
       width: 90%;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      box-shadow: 0 8px 32px #00ffae22, 0 0 0 2px #00ffae11 inset;
+      text-shadow: 0 0 2px #00ffae88;
     }
-    input, button {
+    h2 {
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-size: 2em;
+      background: #00ffae;
+      color: #181f23;
+      display: inline-block;
+      padding: 4px 16px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      letter-spacing: 1.5px;
+      box-shadow: 0 2px 12px #00ffae33;
+      text-shadow: none;
+    }
+    button {
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-weight: bold;
+      cursor: pointer;
       width: 100%;
       margin-top: 10px;
       padding: 10px;
@@ -32,47 +54,197 @@
       border-radius: 10px;
       border: none;
       outline: none;
-    }
-    button {
-      background-color: #1abc9c;
-      color: white;
-      font-weight: bold;
-      cursor: pointer;
+      box-shadow: 0 2px 8px #00ffae22;
+      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+      letter-spacing: 1px;
     }
     button:hover {
-      background-color: #16a085;
+      background: #181f23;
+      color: #00ffae;
+      box-shadow: 0 0 16px #00ffae99;
+      border: 1.5px solid #00ffae;
     }
     .remove-single-btn {
       width: auto;
       padding: 2px 8px;
       font-size: 1rem;
-      background: #e74c3c;
-      color: #fff;
-      border: none;
+      background: #181f23;
+      color: #00ffae;
+      border: 1px solid #00ffae;
       border-radius: 5px;
       cursor: pointer;
       margin-left: 10px;
+      font-family: inherit;
+      transition: background 0.2s, color 0.2s;
+    }
+    .remove-single-btn:hover {
+      background: #00ffae;
+      color: #181f23;
     }
     .file-row {
       display: flex;
       align-items: center;
       margin: 2px 0;
+      font-size: 1.08em;
+      letter-spacing: 0.5px;
+    }
+    #progressCircleContainer {
+      margin: 20px auto 20px auto;
+      background: rgba(0,255,174,0.03);
+      border-radius: 50%;
+      width: 160px;
+      height: 160px;
+      position: relative;
+      display: none;
+      box-shadow: 0 0 24px #00ffae33;
+    }
+    #circularPercent {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%,-50%);
+      color: #00ffae;
+      font-weight: bold;
+      font-size: 1.1em;
+      white-space: nowrap;
+      text-shadow: 0 0 8px #00ffae99;
+      letter-spacing: 1px;
+    }
+    #dropZone {
+      display:none;
+      border: 2px dashed #00ffae;
+      border-radius: 12px;
+      padding: 30px;
+      text-align: center;
+      color: #00ffae;
+      margin-bottom: 10px;
+      background: rgba(0,255,174,0.07);
+      cursor:pointer;
+      font-size: 1.1em;
+      font-family: inherit;
+      letter-spacing: 1px;
+      transition: background 0.2s, border 0.2s;
+      box-shadow: 0 0 12px #00ffae22;
+    }
+    #dropZone:hover, #dropZone.dragover {
+      background: rgba(0,255,174,0.13);
+      border: 2px solid #00ffae;
+      color: #181f23;
+    }
+    #processingDialog {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(10,20,30,0.92);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    #processingDialog > div {
+      background: #181f23;
+      color: #00ffae;
+      padding: 30px 40px;
+      border-radius: 16px;
+      font-size: 1.3em;
+      font-weight: bold;
+      box-shadow: 0 8px 32px #00ffae33;
+      font-family: inherit;
+      letter-spacing: 1.5px;
+      text-align: center;
+      border: 2px solid #00ffae;
+      text-shadow: 0 0 8px #00ffae99;
+    }
+    #connKeyDisplay, #connKeyDisplay + p {
+      color: #00ffae;
+      font-family: inherit;
+      font-size: 1.1em;
+      letter-spacing: 1px;
+      margin-bottom: 0;
+      margin-top: 18px;
+      text-shadow: 0 0 8px #00ffae55;
+      cursor: pointer;
+      user-select: text;
+      transition: background 0.2s;
+    }
+    #connKeyDisplay:hover {
+      background: #00ffae22;
+    }
+    #copyMsg {
+      display: none;
+      position: absolute;
+      left: 50%;
+      top: -28px;
+      transform: translateX(-50%);
+      background: #181f23;
+      color: #00ffae;
+      font-size: 1em;
+      padding: 4px 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px #00ffae33;
+      z-index: 10;
+      text-shadow: 0 0 8px #00ffae99;
+      pointer-events: none;
+    }
+    #qrCanvas {
+      background: #181f23;
+      border-radius: 10px;
+      box-shadow: 0 0 16px #00ffae33;
+      margin-bottom: 10px;
+    }
+    #progressContainer {
+      display:none;
+      margin-top:15px;
+      background: rgba(0,255,174,0.08);
+      border-radius: 10px;
+      overflow: hidden;
+      height: 20px;
+      box-shadow: 0 0 8px #00ffae33;
+    }
+    #progressBar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      transition: width 0.3s;
+      box-shadow: 0 0 8px #00ffae99;
+    }
+    ::selection {
+      background: #00ffae44;
     }
   </style>
 </head>
 <body>
 <div class="container">
-  <h2>P2P File Share 🔐</h2>
+  <h2>P2P File Share <span style="font-size:0.8em;">&#128274;</span></h2>
+  <!-- Circular Progress Indicator (hidden by default, shown only during transfer) -->
+  <div id="progressCircleContainer">
+    <svg id="circularProgress" width="160" height="160">
+      <circle cx="80" cy="80" r="74" stroke="#222c" stroke-width="12" fill="none"/>
+      <circle id="circularBar" cx="80" cy="80" r="74" stroke="#00ffae" stroke-width="12" fill="none"
+        stroke-linecap="round"
+        stroke-dasharray="464.95571273128947"
+        stroke-dashoffset="464.95571273128947"
+        transform="rotate(-90 80 80)"/>
+    </svg>
+    <span id="circularPercent"></span>
+  </div>
   <canvas id="qrCanvas" style="margin-top: 10px; display: none;"></canvas>
   <div class="filePreview" id="filePreview"></div>
-  <input type="file" id="fileInput" style="display: none;" multiple/>
+  <div id="dropZone">Drop files here or click to select</div>
   <button id="removeBtn" style="display: none; margin-top:10px;">Remove All Files</button>
   <button id="sendBtn" style="display: none; margin-top:10px;">Send File</button>
   <button id="newInstanceBtn" style="margin-top:10px; display:none;">Start New Instance</button>
-  <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
-  <div id="progressContainer" style="display:none; margin-top:15px; background: rgba(255,255,255,0.3); border-radius: 10px; overflow: hidden; height: 20px;">
-    <div id="progressBar" style="height: 100%; width: 0%; background: #1abc9c; transition: width 0.3s;"></div>
+  <p style="position: relative; display: inline-block; width: 100%; margin: 0;">
+    <span id="copyMsg">Copied!</span>
+    <span id="connKeyDisplay" style="word-break: break-word; margin-top: 15px; cursor: pointer;" title="Click to copy"></span>
+  </p>
+  <div id="progressContainer">
+    <div id="progressBar"></div>
   </div>
+</div>
+
+<!-- Processing dialog -->
+<div id="processingDialog">
+  <div>Processing...</div>
 </div>
 
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -83,18 +255,42 @@
   let peer;
   let isSender = false;
   let selectedFiles = [];
+  let hiddenFileInput = null; // For click-to-select
 
+  function showProcessingDialog() {
+    document.getElementById('processingDialog').style.display = 'flex';
+  }
+  function hideProcessingDialog() {
+    document.getElementById('processingDialog').style.display = 'none';
+  }
+
+  // Show/hide the circular progress bar only during transfer
   function updateProgress(percent) {
+    // Linear bar (keep for fallback)
     const bar = document.getElementById('progressBar');
     const container = document.getElementById('progressContainer');
-    container.style.display = 'block';
     bar.style.width = percent + '%';
+    container.style.display = 'block';
 
+    // Circular progress (show only during transfer)
+    const circleContainer = document.getElementById('progressCircleContainer');
+    const circle = document.getElementById('circularBar');
+    const percentText = document.getElementById('circularPercent');
+    const radius = 74;
+    const circumference = 2 * Math.PI * radius;
+    if (circle) {
+      circle.style.strokeDasharray = circumference;
+      circle.style.strokeDashoffset = circumference - (percent / 100) * circumference;
+    }
+    if (percentText) {
+      percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
+    }
+    // Always show the circle during and after transfer
+    circleContainer.style.display = "block";
     if (percent >= 100) {
-      setTimeout(() => {
-        container.style.display = 'none';
-        bar.style.width = '0%';
-      }, 1000);
+      // Do not hide the circle or clear the text
+      container.style.display = 'none';
+      bar.style.width = '0%';
     }
   }
 
@@ -105,6 +301,7 @@
     // Show placeholder details instantly for faster feedback
     peer.on('signal', signal => {
       if (signal && signal.type === "offer") {
+        showProcessingDialog();
         document.getElementById('connKeyDisplay').innerText = "Generating Conn Key...";
         // Remove any previous instructions to avoid duplicates
         const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
@@ -123,6 +320,7 @@
     });
 
     socket.on('offer-registered', data => {
+      hideProcessingDialog();
       // Update the connection key and QR code with the real value from the server
       document.getElementById('connKeyDisplay').innerText = "Conn Key: " + data.connKey;
       // Remove any previous instructions to avoid duplicates
@@ -142,10 +340,8 @@
     socket.on('deliver-answer', signal => {
       peer.signal(signal);
       alert("✅ Connection established! You can now select and send files.");
-      document.getElementById('fileInput').style.display = "block";
       document.getElementById('sendBtn').style.display = "block";
       showFilePreview();
-
       // Remove the Conn Key and instructions
       document.getElementById('connKeyDisplay').innerText = "";
       const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
@@ -157,31 +353,11 @@
       // Show the "Start New Instance" button and attach the reload event
       document.getElementById('newInstanceBtn').style.display = "block";
       document.getElementById('newInstanceBtn').onclick = () => location.reload();
-    });
-
-    document.getElementById('fileInput').addEventListener('change', (e) => {
-      const newFiles = Array.from(e.target.files);
-      // Add only files that are not already in selectedFiles (by name & size) and limit to 25
-      newFiles.forEach(newFile => {
-        if (
-          !selectedFiles.some(f => f.name === newFile.name && f.size === newFile.size) &&
-          selectedFiles.length < 25
-        ) {
-          selectedFiles.push(newFile);
-        }
-      });
-      if (selectedFiles.length >= 25 && newFiles.length > 0) {
-        alert("You can select a maximum of 25 files.");
-      }
-      // Update the file input to reflect all selected files
-      const dt = new DataTransfer();
-      selectedFiles.forEach(f => dt.items.add(f));
-      document.getElementById('fileInput').files = dt.files;
-      showFilePreview();
+      // Show dropZone for file selection
+      document.getElementById('dropZone').style.display = 'block';
     });
 
     document.getElementById('removeBtn').addEventListener('click', () => {
-      document.getElementById('fileInput').value = "";
       selectedFiles = [];
       showFilePreview();
     });
@@ -199,11 +375,23 @@
     });
   }
 
+  // --- Unified progress for all files ---
   function sendFiles(files) {
-    const chunkSize = 64 * 1024;
+    const chunkSize = 256 * 1024;
+    let totalBytes = 0;
+    let sentBytes = 0;
+
+    // Calculate total bytes to send (all files)
+    for (const file of files) {
+      totalBytes += file.size;
+    }
 
     function sendFile(index) {
-      if (index >= files.length) return;
+      if (index >= files.length) {
+        updateProgress(100);
+        // Do not hide the progressCircleContainer after completion
+        return;
+      }
 
       const file = files[index];
       const meta = { name: file.name, size: file.size, type: file.type };
@@ -213,19 +401,20 @@
       reader.onload = function (e) {
         const buffer = e.target.result;
         let offset = 0;
-        const totalChunks = Math.ceil(buffer.byteLength / chunkSize);
 
         function sendNextChunk() {
           if (offset < buffer.byteLength) {
+            document.getElementById('progressCircleContainer').style.display = "block";
             const chunk = buffer.slice(offset, offset + chunkSize);
             peer.send(chunk);
+            let chunkLen = chunk.byteLength || chunk.length;
             offset += chunkSize;
-            const progress = Math.min(100, (offset / buffer.byteLength) * 100);
-            updateProgress(progress);
-            setTimeout(sendNextChunk, 10); // throttle sending
+            sentBytes += chunkLen;
+            const percent = Math.min(100, (sentBytes / totalBytes) * 100);
+            updateProgress(percent);
+            sendNextChunk(); // No delay!
           } else {
-            updateProgress(100); // complete
-            setTimeout(() => sendFile(index + 1), 200); // next file
+            sendFile(index + 1);
           }
         }
 
@@ -235,14 +424,17 @@
       reader.readAsArrayBuffer(file);
     }
 
+    // Start progress at 0 and show the circle
+    sentBytes = 0;
+    updateProgress(0);
+    document.getElementById('progressCircleContainer').style.display = "block";
     sendFile(0);
   }
+  // --- End unified progress ---
 
   function showFilePreview() {
     let previewDiv = document.getElementById('filePreview');
     previewDiv.innerHTML = "";
-
-    // Show or hide "Remove All Files" button based on selection
     const removeBtn = document.getElementById('removeBtn');
     if (!selectedFiles || selectedFiles.length === 0) {
       removeBtn.style.display = "none";
@@ -250,43 +442,97 @@
     } else {
       removeBtn.style.display = "block";
     }
-
-    const maxFiles = 5; // Show only 5 files in preview
+    const maxFiles = 5;
     for (let i = 0; i < Math.min(selectedFiles.length, maxFiles); i++) {
       const file = selectedFiles[i];
       const row = document.createElement('div');
       row.className = 'file-row';
-
       const span = document.createElement('span');
       span.textContent = `📄 ${file.name}`;
       row.appendChild(span);
-
-      // Remove button for each file
       const removeBtnSingle = document.createElement('button');
       removeBtnSingle.textContent = '❌';
       removeBtnSingle.className = 'remove-single-btn';
       removeBtnSingle.onclick = () => {
         selectedFiles.splice(i, 1);
-        // Update the file input (reset and re-add remaining files)
-        const dt = new DataTransfer();
-        selectedFiles.forEach(f => dt.items.add(f));
-        document.getElementById('fileInput').files = dt.files;
         showFilePreview();
       };
-
       row.appendChild(removeBtnSingle);
       previewDiv.appendChild(row);
     }
-
-    if (selectedFiles.length > maxFiles) {
+    if (selectedFiles.length > 5) {
       const more = document.createElement('p');
-      more.textContent = `+${selectedFiles.length - maxFiles} more file(s)...`;
+      more.textContent = `+${selectedFiles.length - 5} more file(s)...`;
       more.style.fontStyle = 'italic';
       previewDiv.appendChild(more);
     }
   }
 
-  window.onload = startSender;
+  window.onload = function() {
+    startSender();
+    const dropZone = document.getElementById('dropZone');
+    // Create a hidden file input for click-to-select
+    hiddenFileInput = document.createElement('input');
+    hiddenFileInput.type = 'file';
+    hiddenFileInput.multiple = true;
+    hiddenFileInput.style.display = 'none';
+    document.body.appendChild(hiddenFileInput);
+    // Click on dropZone opens file dialog
+    dropZone.addEventListener('click', () => {
+      hiddenFileInput.value = '';
+      hiddenFileInput.click();
+    });
+    // Handle file selection from dialog
+    hiddenFileInput.addEventListener('change', (e) => {
+      const newFiles = Array.from(e.target.files);
+      newFiles.forEach(newFile => {
+        if (!selectedFiles.some(f => f.name === newFile.name && f.size === newFile.size) && selectedFiles.length < 25) {
+          selectedFiles.push(newFile);
+        }
+      });
+      if (selectedFiles.length >= 25 && newFiles.length > 0) {
+        alert("You can select a maximum of 25 files.");
+      }
+      showFilePreview();
+    });
+    // Drag events
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      const newFiles = Array.from(e.dataTransfer.files);
+      newFiles.forEach(newFile => {
+        if (!selectedFiles.some(f => f.name === newFile.name && f.size === newFile.size) && selectedFiles.length < 25) {
+          selectedFiles.push(newFile);
+        }
+      });
+      if (selectedFiles.length >= 25 && newFiles.length > 0) {
+        alert("You can select a maximum of 25 files.");
+      }
+      showFilePreview();
+    });
+
+    // --- Copy Conn Key to clipboard on click ---
+    const connKeyDisplay = document.getElementById('connKeyDisplay');
+    const copyMsg = document.getElementById('copyMsg');
+    connKeyDisplay.addEventListener('click', function() {
+      const text = connKeyDisplay.innerText.replace(/^Conn Key:\s*/, '').trim();
+      if (text) {
+        copyMsg.style.display = 'block';
+        navigator.clipboard.writeText(text).then(() => {
+          copyMsg.style.display = 'block';
+          setTimeout(() => { copyMsg.style.display = 'none'; }, 1200);
+        });
+      }
+    });
+  };
 </script>
 </body>
 </html>

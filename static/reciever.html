@@ -1,30 +1,74 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <title>P2P File Share</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
     body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #2c3e50, #3498db);
+      font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+      background: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
       height: 100vh;
       margin: 0;
       display: flex;
       justify-content: center;
       align-items: center;
+      color: #00ffae;
+      letter-spacing: 0.5px;
+      user-select: none;
     }
     .container {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: rgba(20, 30, 40, 0.95);
+      border: 2px solid #00ffae44;
       border-radius: 20px;
-      padding: 30px;
-      color: #fff;
+      padding: 32px 36px 32px 36px;
+      color: #00ffae;
       max-width: 600px;
       width: 90%;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      box-shadow: 0 8px 32px #00ffae22, 0 0 0 2px #00ffae11 inset;
+      text-shadow: 0 0 2px #00ffae88;
+    }
+    h2 {
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-size: 2em;
+      background: #00ffae;
+      color: #181f23;
+      display: inline-block;
+      padding: 4px 16px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      letter-spacing: 1.5px;
+      box-shadow: 0 2px 12px #00ffae33;
+      text-shadow: none;
     }
     input, button {
+      font-family: inherit;
+      font-size: 1.1em;
+      letter-spacing: 1px;
+    }
+    input[type="text"], input[type="password"], input[type="number"], input[type="email"], input[type="search"], input[type="url"], input[type="tel"], input[type="file"], input[type="input"], input[type="button"], input[type="submit"], input[type="reset"], input[type="date"], input[type="datetime-local"], input[type="month"], input[type="time"], input[type="week"] {
+      width: 100%;
+      padding: 10px;
+      margin: 12px 0 18px 0;
+      border-radius: 8px;
+      border: 1.5px solid #00ffae99;
+      background: #181f23;
+      color: #00ffae;
+      outline: none;
+      box-shadow: 0 0 8px #00ffae22;
+      transition: border 0.2s;
+    }
+    input:focus {
+      border: 2px solid #00ffae;
+      background: #232b36;
+    }
+    button {
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-weight: bold;
+      cursor: pointer;
       width: 100%;
       margin-top: 10px;
       padding: 10px;
@@ -32,21 +76,27 @@
       border-radius: 10px;
       border: none;
       outline: none;
-    }
-    button {
-      background-color: #1abc9c;
-      color: white;
-      font-weight: bold;
-      cursor: pointer;
+      box-shadow: 0 2px 8px #00ffae22;
+      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+      letter-spacing: 1px;
     }
     button:hover {
-      background-color: #16a085;
+      background: #181f23;
+      color: #00ffae;
+      box-shadow: 0 0 16px #00ffae99;
+      border: 1.5px solid #00ffae;
     }
-    #receivedFiles a {
-      color: #1abc9c;
+    #receivedFiles a, .download-link {
+      color: #00ffae;
       text-decoration: underline;
       display: block;
       margin-bottom: 6px;
+      font-size: 1em;
+      transition: color 0.2s;
+    }
+    #receivedFiles a:hover, .download-link:hover {
+      color: #fff;
+      text-shadow: 0 0 8px #00ffae;
     }
     #receivedFiles h4 {
       margin-bottom: 8px;
@@ -55,25 +105,82 @@
     #qr-reader {
       border-radius: 10px;
       overflow: hidden;
+      background: #181f23;
+      box-shadow: 0 0 16px #00ffae33;
+      margin-top: 15px;
+      display: none;
     }
     /* Processing dialog */
     #processingDialog {
       display: none;
       position: fixed;
       top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(44,62,80,0.7);
+      background: rgba(10,20,30,0.92);
       z-index: 9999;
       align-items: center;
       justify-content: center;
     }
     #processingDialog > div {
-      background: #fff;
-      color: #2c3e50;
+      background: #181f23;
+      color: #00ffae;
       padding: 30px 40px;
       border-radius: 16px;
       font-size: 1.3em;
       font-weight: bold;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      box-shadow: 0 8px 32px #00ffae33;
+      font-family: inherit;
+      letter-spacing: 1.5px;
+      text-align: center;
+      border: 2px solid #00ffae;
+      text-shadow: 0 0 8px #00ffae99;
+    }
+    .file-row {
+      display: flex;
+      align-items: center;
+      margin: 2px 0;
+      font-size: 1.08em;
+      letter-spacing: 0.5px;
+    }
+    .download-link {
+      color: #00ffae;
+      text-decoration: underline;
+      margin-left: 10px;
+      cursor: pointer;
+      font-size: 1em;
+      transition: color 0.2s;
+    }
+    .download-link:hover {
+      color: #fff;
+      text-shadow: 0 0 8px #00ffae;
+    }
+    #progressContainer {
+      display:none;
+      margin: 20px auto 0 auto;
+      background: rgba(0,255,174,0.03);
+      border-radius: 50%;
+      width: 160px;
+      height: 160px;
+      position: relative;
+      box-shadow: 0 0 24px #00ffae33;
+    }
+    #circularPercent {
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      color:#00ffae;font-weight:bold;font-size:1.1em;white-space:nowrap;text-shadow:0 0 8px #00ffae99;letter-spacing:1px;
+    }
+    #circularBar {
+      stroke: #00ffae;
+    }
+    #connKeyDisplay {
+      color: #00ffae;
+      font-family: inherit;
+      font-size: 1.1em;
+      letter-spacing: 1px;
+      margin-bottom: 0;
+      margin-top: 18px;
+      text-shadow: 0 0 8px #00ffae55;
+    }
+    ::selection {
+      background: #00ffae44;
     }
   </style>
 </head>
@@ -92,9 +199,10 @@
     <span id="circularPercent" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#1abc9c;font-weight:bold;font-size:1.1em;white-space:nowrap;"></span>
   </div>
   <div id="receivedFiles" style="margin-top:20px;"></div>
-  <input id="connKeyInput" placeholder="Enter 18-char Conn Key" />
+  <input id="connKeyInput" placeholder="Enter Connection Key here" style="font-size:1.1em; letter-spacing:1px; width: 420px; max-width: 100%;" />
   <button onclick="startReceiver()">Start receiving</button>
   <button onclick="scanQR()">📷 Scan QR</button>
+  <button id="downloadAllZipBtn" style="margin-top:10px; display:none;">Download All as ZIP</button>
   <div id="qr-reader" style="width: 100%; margin-top: 15px; display: none;"></div>
   <button id="disconnectBtn" style="margin-top:10px; display:none;">Disconnect & Start New</button>
   <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
@@ -112,6 +220,32 @@
   let isSender = false;
   let receivedFiles = [];
   let html5Qr;
+  let zipMode = false;
+
+  function askZipIfNeeded() {
+    if (receivedFiles.length === 5) {
+      if (confirm("You have received 5 or more files. Do you want to zip them?")) {
+        zipMode = true;
+        createAndDownloadZip();
+      }
+    }
+  }
+
+  async function createAndDownloadZip() {
+    const zip = new JSZip();
+    for (const file of receivedFiles) {
+      // Fetch the blob again from the URL
+      const response = await fetch(file.url);
+      const blob = await response.blob();
+      zip.file(file.name, blob);
+    }
+    const content = await zip.generateAsync({ type: "blob" });
+    const zipUrl = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = zipUrl;
+    a.download = "received_files.zip";
+    a.click();
+  }
 
   function showProcessingDialog() {
     document.getElementById('processingDialog').style.display = 'flex';
@@ -165,30 +299,50 @@
     // Do not hide the progress circle after completion
   }
 
-  function showReceivedFiles() {
-    const container = document.getElementById('receivedFiles');
-    container.innerHTML = "<h4>Received Files:</h4>";
-    if (receivedFiles.length === 0) {
-      container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
-      return;
-    }
-    const maxFiles = 5;
-    for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
-      const file = receivedFiles[i];
-      const link = document.createElement('a');
-      link.href = file.url;
-      link.download = file.name;
-      link.textContent = `📥 ${file.name}`;
-      container.appendChild(link);
-    }
-    if (receivedFiles.length > maxFiles) {
-      const more = document.createElement('p');
-      more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
-      more.style.fontStyle = 'italic';
-      more.style.color = '#eee';
-      container.appendChild(more);
-    }
+function showReceivedFiles() {
+  const container = document.getElementById('receivedFiles');
+  container.innerHTML = "<h4>Received Files:</h4>";
+  if (receivedFiles.length === 0) {
+    container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
+    document.getElementById('downloadAllZipBtn').style.display = "none";
+    return;
   }
+  const maxFiles = 5;
+  for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
+    const file = receivedFiles[i];
+    const row = document.createElement('div');
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.marginBottom = "6px";
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = `📥 ${file.name}`;
+    nameSpan.style.flex = "1";
+    row.appendChild(nameSpan);
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.textContent = "Download";
+    downloadBtn.style.marginLeft = "10px";
+    downloadBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = file.url;
+      a.download = file.name;
+      a.click();
+    };
+    row.appendChild(downloadBtn);
+
+    container.appendChild(row);
+  }
+  if (receivedFiles.length > maxFiles) {
+    const more = document.createElement('p');
+    more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
+    more.style.fontStyle = 'italic';
+    more.style.color = '#eee';
+    container.appendChild(more);
+  }
+  // Show the "Download All as ZIP" button if at least 1 file
+  document.getElementById('downloadAllZipBtn').style.display = "block";
+}
 
   function startReceiver() {
     isSender = false;
@@ -211,10 +365,11 @@
     });
 
     peer.on('connect', () => {
-      hideProcessingDialog();
-      alert("✅ Connected! You can now receive files.");
-      document.getElementById('disconnectBtn').style.display = "block";
-    });
+  hideProcessingDialog();
+  alert("✅ Connected! You can now receive files.");
+  document.getElementById('disconnectBtn').style.display = "block";
+  document.querySelector('button[onclick="scanQR()"]').style.display = "none";
+});
 
     let incomingChunks = [];
     let incomingMeta = null;
@@ -240,14 +395,11 @@
         if (receivedSize >= incomingMeta.size) {
           const blob = new Blob(incomingChunks, { type: incomingMeta.type });
           const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = incomingMeta.name;
-          a.click();
 
-          // Save to receivedFiles and update UI
+          // Do NOT auto-download. Just add to receivedFiles and update UI.
           receivedFiles.push({ name: incomingMeta.name, url });
           showReceivedFiles();
+          askZipIfNeeded();
 
           incomingChunks = [];
           incomingMeta = null;
@@ -258,6 +410,21 @@
   document.getElementById('disconnectBtn').onclick = function() {
     location.reload();
   };
+  document.getElementById('downloadAllZipBtn').onclick = async function() {
+  if (receivedFiles.length === 0) return;
+  const zip = new JSZip();
+  for (const file of receivedFiles) {
+    const response = await fetch(file.url);
+    const blob = await response.blob();
+    zip.file(file.name, blob);
+  }
+  const content = await zip.generateAsync({ type: "blob" });
+  const zipUrl = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = zipUrl;
+  a.download = "received_files.zip";
+  a.click();
+};
 </script>
 </body>
 </html>

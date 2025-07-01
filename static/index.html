@@ -2,28 +2,51 @@
 <html>
 <head>
   <title>P2P File Share</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
     body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #2c3e50, #3498db);
+      font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
+      background: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
       height: 100vh;
       margin: 0;
       display: flex;
       justify-content: center;
       align-items: center;
+      color: #00ffae;
+      letter-spacing: 0.5px;
+      user-select: none;
     }
     .container {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
+      background: rgba(20, 30, 40, 0.95);
+      border: 2px solid #00ffae44;
       border-radius: 20px;
-      padding: 30px;
-      color: #fff;
+      padding: 32px 36px 32px 36px;
+      color: #00ffae;
       max-width: 600px;
       width: 90%;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      box-shadow: 0 8px 32px #00ffae22, 0 0 0 2px #00ffae11 inset;
+      text-shadow: 0 0 2px #00ffae88;
     }
-    input, button {
+    h2 {
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-size: 2em;
+      background: #00ffae;
+      color: #181f23;
+      display: inline-block;
+      padding: 4px 16px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      letter-spacing: 1.5px;
+      box-shadow: 0 2px 12px #00ffae33;
+      text-shadow: none;
+    }
+    button {
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      font-weight: bold;
+      cursor: pointer;
       width: 100%;
       margin-top: 10px;
       padding: 10px;
@@ -31,37 +54,46 @@
       border-radius: 10px;
       border: none;
       outline: none;
-    }
-    button {
-      background-color: #1abc9c;
-      color: white;
-      font-weight: bold;
-      cursor: pointer;
+      box-shadow: 0 2px 8px #00ffae22;
+      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+      letter-spacing: 1px;
     }
     button:hover {
-      background-color: #16a085;
+      background: #181f23;
+      color: #00ffae;
+      box-shadow: 0 0 16px #00ffae99;
+      border: 1.5px solid #00ffae;
+    }
+    #connKeyDisplay {
+      color: #00ffae;
+      font-family: inherit;
+      font-size: 1.1em;
+      letter-spacing: 1px;
+      margin-bottom: 0;
+      margin-top: 18px;
+      text-shadow: 0 0 8px #00ffae55;
+    }
+    ::selection {
+      background: #00ffae44;
     }
   </style>
 </head>
 <body>
 <div class="container">
-  <h2>P2P File Share 🔐</h2>
-
+  <h2>P2P File Share <span style="font-size:0.8em;">&#128274;</span></h2>
+  <h3 style="margin-bottom: 24px; color: #00ffae; text-shadow: 0 0 8px #00ffae55; font-size: 1.2em; font-weight: 400;">Choose your role</h3>
   <button onclick="send_redirect()">Start as Sender</button>
   <button onclick="recieve_redirect()">Start as Receiver</button>
-
   <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
 </div>
-
 <script>
    function send_redirect(){
-        window.location.href = 'sender.html'; // Replace with your desired URL
+        window.location.href = 'sender.html';
    }
    function recieve_redirect(){
-        window.location.href = 'reciever.html'; // Replace with your desired URL
+        window.location.href = 'reciever.html';
    }
 </script>
-
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 </body>
