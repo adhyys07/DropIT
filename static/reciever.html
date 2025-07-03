@@ -179,6 +179,25 @@
       margin-top: 18px;
       text-shadow: 0 0 8px #00ffae55;
     }
+    .dotted-box {
+      border: 2px dashed #00ffae;
+      border-radius: 12px;
+      padding: 32px 0;
+      text-align: center;
+      color: #00ffae;
+      background: rgba(0,255,174,0.07);
+      font-size: 1.1em;
+      margin: 18px 0 0 0;
+      letter-spacing: 1px;
+    }
+    /* Fixed width for download buttons in received files */
+    .fixed-download-btn {
+      min-width: 120px;
+      max-width: 120px;
+      width: 120px;
+      text-align: center;
+      display: inline-block;
+    }
     ::selection {
       background: #00ffae44;
     }
@@ -187,6 +206,7 @@
 <body>
 <div class="container">
   <h2>P2P File Share 🔐</h2>
+  <!-- Progress Circle (no speed/eta) -->
   <div id="progressContainer" style="display:none; margin: 20px auto 0 auto; background: rgba(255,255,255,0.0); border-radius: 50%; width: 160px; height: 160px; position: relative;">
     <svg id="circularProgress" width="160" height="160">
       <circle cx="80" cy="80" r="74" stroke="#eee" stroke-width="12" fill="none"/>
@@ -221,6 +241,7 @@
   let receivedFiles = [];
   let html5Qr;
   let zipMode = false;
+  let transferStartTime = null;
 
   function askZipIfNeeded() {
     if (receivedFiles.length === 5) {
@@ -234,7 +255,6 @@
   async function createAndDownloadZip() {
     const zip = new JSZip();
     for (const file of receivedFiles) {
-      // Fetch the blob again from the URL
       const response = await fetch(file.url);
       const blob = await response.blob();
       zip.file(file.name, blob);
@@ -280,8 +300,8 @@
     });
   }
 
-  function updateProgress(percent) {
-    // Circular progress
+  function updateProgress(percent, receivedBytes, totalBytes) {
+    // Circular progress only
     const container = document.getElementById('progressContainer');
     container.style.display = 'block';
 
@@ -296,53 +316,53 @@
     if (percentText) {
       percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
     }
-    // Do not hide the progress circle after completion
+    // No speed or ETA display
   }
 
-function showReceivedFiles() {
-  const container = document.getElementById('receivedFiles');
-  container.innerHTML = "<h4>Received Files:</h4>";
-  if (receivedFiles.length === 0) {
-    container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
-    document.getElementById('downloadAllZipBtn').style.display = "none";
-    return;
-  }
-  const maxFiles = 5;
-  for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
-    const file = receivedFiles[i];
-    const row = document.createElement('div');
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.marginBottom = "6px";
+  function showReceivedFiles() {
+    const container = document.getElementById('receivedFiles');
+    container.innerHTML = "<h4>Received Files:</h4>";
+    if (receivedFiles.length === 0) {
+      container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
+      document.getElementById('downloadAllZipBtn').style.display = "none";
+      return;
+    }
+    const maxFiles = 5;
+    for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
+      const file = receivedFiles[i];
+      const row = document.createElement('div');
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.marginBottom = "6px";
 
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = `📥 ${file.name}`;
-    nameSpan.style.flex = "1";
-    row.appendChild(nameSpan);
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = `📥 ${file.name}`;
+      nameSpan.style.flex = "1";
+      row.appendChild(nameSpan);
 
-    const downloadBtn = document.createElement('button');
-    downloadBtn.textContent = "Download";
-    downloadBtn.style.marginLeft = "10px";
-    downloadBtn.onclick = () => {
-      const a = document.createElement('a');
-      a.href = file.url;
-      a.download = file.name;
-      a.click();
-    };
-    row.appendChild(downloadBtn);
+      const downloadBtn = document.createElement('button');
+      downloadBtn.textContent = "Download";
+      downloadBtn.className = "fixed-download-btn";
+      downloadBtn.style.marginLeft = "10px";
+      downloadBtn.onclick = () => {
+        const a = document.createElement('a');
+        a.href = file.url;
+        a.download = file.name;
+        a.click();
+      };
+      row.appendChild(downloadBtn);
 
-    container.appendChild(row);
+      container.appendChild(row);
+    }
+    if (receivedFiles.length > maxFiles) {
+      const more = document.createElement('p');
+      more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
+      more.style.fontStyle = 'italic';
+      more.style.color = '#eee';
+      container.appendChild(more);
+    }
+    document.getElementById('downloadAllZipBtn').style.display = "block";
   }
-  if (receivedFiles.length > maxFiles) {
-    const more = document.createElement('p');
-    more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
-    more.style.fontStyle = 'italic';
-    more.style.color = '#eee';
-    container.appendChild(more);
-  }
-  // Show the "Download All as ZIP" button if at least 1 file
-  document.getElementById('downloadAllZipBtn').style.display = "block";
-}
 
   function startReceiver() {
     isSender = false;
@@ -365,11 +385,19 @@ function showReceivedFiles() {
     });
 
     peer.on('connect', () => {
-  hideProcessingDialog();
-  alert("✅ Connected! You can now receive files.");
-  document.getElementById('disconnectBtn').style.display = "block";
-  document.querySelector('button[onclick="scanQR()"]').style.display = "none";
-});
+      hideProcessingDialog();
+      alert("✅ Connected! You can now receive files.");
+      document.getElementById('disconnectBtn').style.display = "block";
+      document.querySelector('button[onclick="scanQR()"]').style.display = "none";
+      document.getElementById('connKeyInput').style.display = "none";
+      document.querySelector('button[onclick="startReceiver()"]').style.display = "none";
+      const receivedFilesDiv = document.getElementById('receivedFiles');
+      receivedFilesDiv.innerHTML = `
+        <div class="dotted-box">
+          No files received yet
+        </div>
+      `;
+    });
 
     let incomingChunks = [];
     let incomingMeta = null;
@@ -381,6 +409,7 @@ function showReceivedFiles() {
         if (parsed.type === 'file-meta') {
           incomingMeta = parsed.meta;
           incomingChunks = [];
+          transferStartTime = null;
           return;
         }
       } catch (err) {}
@@ -390,13 +419,12 @@ function showReceivedFiles() {
 
         const receivedSize = incomingChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
         const percent = Math.min(100, (receivedSize / incomingMeta.size) * 100);
-        updateProgress(percent);
+        updateProgress(percent, receivedSize, incomingMeta.size);
 
         if (receivedSize >= incomingMeta.size) {
           const blob = new Blob(incomingChunks, { type: incomingMeta.type });
           const url = URL.createObjectURL(blob);
 
-          // Do NOT auto-download. Just add to receivedFiles and update UI.
           receivedFiles.push({ name: incomingMeta.name, url });
           showReceivedFiles();
           askZipIfNeeded();
@@ -411,20 +439,20 @@ function showReceivedFiles() {
     location.reload();
   };
   document.getElementById('downloadAllZipBtn').onclick = async function() {
-  if (receivedFiles.length === 0) return;
-  const zip = new JSZip();
-  for (const file of receivedFiles) {
-    const response = await fetch(file.url);
-    const blob = await response.blob();
-    zip.file(file.name, blob);
-  }
-  const content = await zip.generateAsync({ type: "blob" });
-  const zipUrl = URL.createObjectURL(content);
-  const a = document.createElement('a');
-  a.href = zipUrl;
-  a.download = "received_files.zip";
-  a.click();
-};
+    if (receivedFiles.length === 0) return;
+    const zip = new JSZip();
+    for (const file of receivedFiles) {
+      const response = await fetch(file.url);
+      const blob = await response.blob();
+      zip.file(file.name, blob);
+    }
+    const content = await zip.generateAsync({ type: "blob" });
+    const zipUrl = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = zipUrl;
+    a.download = "received_files.zip";
+    a.click();
+  };
 </script>
 </body>
 </html>
