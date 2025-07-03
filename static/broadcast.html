@@ -2,7 +2,9 @@
 <html>
 <head>
   <script src="https://cdn.jsdelivr.net/npm/qrious/dist/qrious.min.js"></script>
-  <title>P2P File Share</title>
+  <title>P2P File Share Broadcast</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
     body {
@@ -221,45 +223,46 @@
 </head>
 <body>
 <div class="container">
-  <h2>P2P File Share <span style="font-size:0.8em;">&#128274;</span></h2>
-  <!-- Circular Progress Indicator (hidden by default, shown only during transfer) -->
-<!-- Replace the #progressCircleContainer block with the following: -->
-<div id="progressCircleContainer" style="position:relative;">
-  <svg id="circularProgress" width="160" height="160">
-    <circle cx="80" cy="80" r="74" stroke="#222c" stroke-width="12" fill="none"/>
-    <circle id="circularBar" cx="80" cy="80" r="74" stroke="#00ffae" stroke-width="12" fill="none"
-      stroke-linecap="round"
-      stroke-dasharray="464.95571273128947"
-      stroke-dashoffset="464.95571273128947"
-      transform="rotate(-90 80 80)"/>
-  </svg>
-  <span id="circularPercent" style="z-index:2;"></span>
-  <div id="transferStats" style="
-    position: absolute;
-    top: 50%;
-    left: 180px;
-    transform: translateY(-50%);
-    min-width: 120px;
-    text-align: left;
-    margin-left: 10px;
-    font-size: 1em;
-    color: #00ffae;
-    display: none;
-    line-height: 1.6;
-    ">
-    <div id="speedStat"></div>
-    <div id="etaStat"></div>
+  <h2>P2P Broadcast Sender <span style="font-size:0.8em;">&#128274;</span></h2>
+  <div id="progressCircleContainer" style="position:relative;">
+    <svg id="circularProgress" width="160" height="160">
+      <circle cx="80" cy="80" r="74" stroke="#222c" stroke-width="12" fill="none"/>
+      <circle id="circularBar" cx="80" cy="80" r="74" stroke="#00ffae" stroke-width="12" fill="none"
+        stroke-linecap="round"
+        stroke-dasharray="464.95571273128947"
+        stroke-dashoffset="464.95571273128947"
+        transform="rotate(-90 80 80)"/>
+    </svg>
+    <span id="circularPercent" style="z-index:2;"></span>
+    <div id="transferStats" style="
+      position: absolute;
+      top: 50%;
+      left: 180px;
+      transform: translateY(-50%);
+      min-width: 120px;
+      text-align: left;
+      margin-left: 10px;
+      font-size: 1em;
+      color: #00ffae;
+      display: none;
+      line-height: 1.6;
+      ">
+      <div id="speedStat"></div>
+      <div id="etaStat"></div>
+    </div>
   </div>
-</div>
   <canvas id="qrCanvas" style="margin-top: 10px; display: none;"></canvas>
   <div class="filePreview" id="filePreview"></div>
   <div id="dropZone">Drop files here or click to select</div>
   <button id="removeBtn" style="display: none; margin-top:10px;">Remove All Files</button>
-  <button id="sendBtn" style="display: none; margin-top:10px;">Send File</button>
+  <button id="sendBtn" style="display: none; margin-top:10px;">Broadcast Files</button>
   <button id="newInstanceBtn" style="margin-top:10px; display:none;">Start New Instance</button>
   <p style="position: relative; display: inline-block; width: 100%; margin: 0;">
     <span id="copyMsg">Copied!</span>
     <span id="connKeyDisplay" style="word-break: break-word; margin-top: 15px; cursor: pointer;" title="Click to copy"></span>
+  </p>
+  <p id="connKeyInstructions" style="margin-top:10px; color:#00ffae; font-size:1em;">
+    Share this key with all receivers to let them connect and receive your files.
   </p>
   <div id="progressContainer">
     <div id="progressBar"></div>
@@ -268,6 +271,7 @@
       <span id="etaStat" style="margin-left:18px;"></span>
     </div>
   </div>
+  <div id="status" style="margin-top:10px; font-size:1.1em;"></div>
 </div>
 
 <!-- Processing dialog -->
@@ -280,10 +284,10 @@
 
 <script>
   const socket = io();
-  let peer;
-  let isSender = false;
+  let peers = [];
+  let connKey = null;
   let selectedFiles = [];
-  let hiddenFileInput = null; // For click-to-select
+  let hiddenFileInput = null;
   let transferStartTime = null;
 
   function showProcessingDialog() {
@@ -293,15 +297,12 @@
     document.getElementById('processingDialog').style.display = 'none';
   }
 
-  // Show/hide the circular progress bar only during transfer
   function updateProgress(percent) {
-    // Linear bar (keep for fallback)
     const bar = document.getElementById('progressBar');
     const container = document.getElementById('progressContainer');
     bar.style.width = percent + '%';
     container.style.display = 'block';
 
-    // Circular progress (show only during transfer)
     const circleContainer = document.getElementById('progressCircleContainer');
     const circle = document.getElementById('circularBar');
     const percentText = document.getElementById('circularPercent');
@@ -314,13 +315,8 @@
     if (percentText) {
       percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
     }
-    // Always show the circle during and after transfer
     circleContainer.style.display = "block";
-    // Do not hide the circle or clear the text after 100%
-    // container.style.display = 'none'; // Do not hide container
-    // bar.style.width = '0%'; // Do not reset bar
 
-    // --- Transfer speed and ETA ---
     const statsDiv = document.getElementById('transferStats');
     const speedSpan = document.getElementById('speedStat');
     const etaSpan = document.getElementById('etaStat');
@@ -343,163 +339,15 @@
 
       const remaining = updateProgress.totalBytes - bytesSent;
       const eta = speed > 0 ? remaining / speed : 0;
-      // Always show stats, even after complete
       etaSpan.textContent = percent >= 100 ? "ETA: 0s" : `ETA: ${eta > 0 ? Math.ceil(eta) + "s" : "0s"}`;
-      // Do NOT hide statsDiv after completion
-      if (percent >= 100) {
-        // Optionally, reset transferStartTime if you want to start fresh for next transfer
-        // transferStartTime = null;
-      }
     } else {
       statsDiv.style.display = "none";
     }
   }
 
-  function startSender() {
-    isSender = true;
-    peer = new SimplePeer({ initiator: true, trickle: false });
-
-    // Show placeholder details instantly for faster feedback
-    peer.on('signal', signal => {
-      if (signal && signal.type === "offer") {
-        showProcessingDialog();
-        document.getElementById('connKeyDisplay').innerText = "Generating Conn Key...";
-        // Remove any previous instructions to avoid duplicates
-        const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-        if (!nextElem || !nextElem.textContent.includes("Share this key")) {
-          document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
-        }
-        const qrCanvas = document.getElementById('qrCanvas');
-        qrCanvas.style.display = "block";
-        new QRious({
-          element: qrCanvas,
-          value: "Generating...",
-          size: 200
-        });
-      }
-      socket.emit('register-offer', { signal });
-    });
-
-    socket.on('offer-registered', data => {
-      hideProcessingDialog();
-      // Update the connection key and QR code with the real value from the server
-      document.getElementById('connKeyDisplay').innerText = "Conn Key: " + data.connKey;
-      // Remove any previous instructions to avoid duplicates
-      const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-      if (!nextElem || !nextElem.textContent.includes("Share this key")) {
-        document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
-      }
-      const qrCanvas = document.getElementById('qrCanvas');
-      qrCanvas.style.display = "block";
-      new QRious({
-        element: qrCanvas,
-        value: data.connKey,
-        size: 200
-      });
-    });
-
-    socket.on('deliver-answer', signal => {
-      peer.signal(signal);
-      alert("✅ Connection established! You can now select and send files.");
-      document.getElementById('sendBtn').style.display = "block";
-      showFilePreview();
-      // Remove the Conn Key and instructions
-      document.getElementById('connKeyDisplay').innerText = "";
-      const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-      if (nextElem && nextElem.tagName === "P" && nextElem.textContent.includes("Share this key")) {
-        nextElem.remove();
-      }
-      // Hide the QR code after connection is established
-      document.getElementById('qrCanvas').style.display = "none";
-      // Show the "Start New Instance" button and attach the reload event
-      document.getElementById('newInstanceBtn').style.display = "block";
-      document.getElementById('newInstanceBtn').onclick = () => location.reload();
-      // Show dropZone for file selection
-      document.getElementById('dropZone').style.display = 'block';
-    });
-
-    document.getElementById('removeBtn').addEventListener('click', () => {
-      selectedFiles = [];
-      showFilePreview();
-    });
-
-    document.getElementById('sendBtn').addEventListener('click', () => {
-      if (!selectedFiles.length) {
-        alert("Please select file(s) first.");
-        return;
-      }
-      if (!peer.connected) {
-        alert("Connection not established yet. Please wait for the receiver.");
-        return;
-      }
-      sendFiles(selectedFiles);
-    });
+  function updateStatus() {
+    document.getElementById('status').innerText = `Connected receivers: ${peers.length}`;
   }
-
-  // --- Unified progress for all files ---
-  function sendFiles(files) {
-    const chunkSize = 256 * 1024;
-    let totalBytes = 0;
-    let sentBytes = 0;
-
-    // Calculate total bytes to send (all files)
-    for (const file of files) {
-      totalBytes += file.size;
-    }
-    updateProgress.totalBytes = totalBytes;
-
-    function sendFile(index) {
-      if (index >= files.length) {
-        updateProgress.sentBytes = totalBytes;
-        updateProgress(100);
-        return;
-      }
-
-      const file = files[index];
-      const meta = { name: file.name, size: file.size, type: file.type };
-      peer.send(JSON.stringify({ type: 'file-meta', meta }));
-
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        const buffer = e.target.result;
-        let offset = 0;
-
-function sendNextChunk() {
-  if (offset < buffer.byteLength) {
-    const chunk = buffer.slice(offset, offset + chunkSize);
-    // Wait if the buffer is too full
-    if (peer.bufferedAmount > 2 * 1024 * 1024) { // 2MB threshold
-      setTimeout(sendNextChunk, 20);
-      return;
-    }
-    peer.send(chunk);
-    offset += chunkSize;
-    sentBytes += chunk.byteLength || chunk.length;
-    updateProgress.sentBytes = sentBytes;
-    const percent = Math.min(100, (sentBytes / totalBytes) * 100);
-    updateProgress(percent);
-    setTimeout(sendNextChunk, 0); // Yield to event loop
-  } else {
-    sendFile(index + 1);
-  }
-}
-
-        sendNextChunk();
-      };
-
-      reader.readAsArrayBuffer(file);
-    }
-
-    // Start progress at 0 and show the circle
-    sentBytes = 0;
-    updateProgress.sentBytes = 0;
-    updateProgress.totalBytes = totalBytes;
-    transferStartTime = null;
-    updateProgress(0);
-    document.getElementById('progressCircleContainer').style.display = "block";
-    sendFile(0);
-  }
-  // --- End unified progress ---
 
   function showFilePreview() {
     let previewDiv = document.getElementById('filePreview');
@@ -537,21 +385,116 @@ function sendNextChunk() {
     }
   }
 
+  // --- Broadcast logic for multiple receivers ---
+  function startBroadcastSender() {
+  socket.emit('create-broadcast'); // Request to start a broadcast
+  socket.on('broadcast-created', (data) => {
+    connKey = data.connKey;
+    document.getElementById('connKeyDisplay').innerText = "Conn Key: " + connKey;
+
+    // Show QR code
+    const qrCanvas = document.getElementById('qrCanvas');
+    qrCanvas.style.display = "block";
+    new QRious({
+      element: qrCanvas,
+      value: connKey,
+      size: 200
+    });
+  });
+
+  socket.on('get-offer', ({ socketId }) => {
+    const peer = new SimplePeer({ initiator: true, trickle: false });
+
+    peer.on('signal', signal => {
+      socket.emit('send-offer', { signal, connKey, target: socketId });
+    });
+
+    peer.on('connect', () => {
+      peers.push(peer);
+      updateStatus();
+      document.getElementById('sendBtn').style.display = "block";
+      document.getElementById('dropZone').style.display = 'block';
+    });
+
+    peer.on('data', data => {
+      console.log("Received data from receiver (should not happen):", data);
+    });
+
+    peer.on('close', () => {
+      peers = peers.filter(p => p !== peer);
+      updateStatus();
+    });
+
+    peer.on('error', () => {
+      peers = peers.filter(p => p !== peer);
+      updateStatus();
+    });
+
+    // Store reference for signaling
+    peer._socketId = socketId;
+  });
+
+  socket.on('deliver-answer', ({ signal, socketId }) => {
+    const peer = peers.find(p => p._socketId === socketId);
+    if (peer) peer.signal(signal);
+  });
+}
+
+
+  function broadcastFiles(files) {
+    if (peers.length === 0) {
+      alert("No receivers connected!");
+      return;
+    }
+    // Progress for all peers (optional: you can track per-peer progress)
+    let totalBytes = files.reduce((acc, file) => acc + file.size, 0) * peers.length;
+    let sentBytes = 0;
+    updateProgress.totalBytes = totalBytes;
+    updateProgress.sentBytes = 0;
+    transferStartTime = null;
+    updateProgress(0);
+
+    peers.forEach(peer => {
+      files.forEach(file => {
+        const meta = { name: file.name, size: file.size, type: file.type };
+        peer.send(JSON.stringify({ type: 'file-meta', meta }));
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const buffer = e.target.result;
+          const chunkSize = 256 * 1024;
+          let offset = 0;
+          function sendNextChunk() {
+            if (offset < buffer.byteLength) {
+              const chunk = buffer.slice(offset, offset + chunkSize);
+              peer.send(chunk);
+              offset += chunkSize;
+              sentBytes += chunk.byteLength || chunk.length;
+              updateProgress.sentBytes = sentBytes;
+              const percent = Math.min(100, (sentBytes / totalBytes) * 100);
+              updateProgress(percent);
+              setTimeout(sendNextChunk, 0);
+            }
+          }
+          sendNextChunk();
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    });
+  }
+
   window.onload = function() {
-    startSender();
+    startBroadcastSender();
     const dropZone = document.getElementById('dropZone');
-    // Create a hidden file input for click-to-select
     hiddenFileInput = document.createElement('input');
     hiddenFileInput.type = 'file';
     hiddenFileInput.multiple = true;
     hiddenFileInput.style.display = 'none';
     document.body.appendChild(hiddenFileInput);
-    // Click on dropZone opens file dialog
+
     dropZone.addEventListener('click', () => {
       hiddenFileInput.value = '';
       hiddenFileInput.click();
     });
-    // Handle file selection from dialog
     hiddenFileInput.addEventListener('change', (e) => {
       const newFiles = Array.from(e.target.files);
       newFiles.forEach(newFile => {
@@ -564,7 +507,6 @@ function sendNextChunk() {
       }
       showFilePreview();
     });
-    // Drag events
     dropZone.addEventListener('dragover', e => {
       e.preventDefault();
       dropZone.classList.add('dragover');
@@ -588,6 +530,19 @@ function sendNextChunk() {
       showFilePreview();
     });
 
+    document.getElementById('removeBtn').addEventListener('click', () => {
+      selectedFiles = [];
+      showFilePreview();
+    });
+
+    document.getElementById('sendBtn').addEventListener('click', () => {
+      if (!selectedFiles.length) {
+        alert("Please select file(s) first.");
+        return;
+      }
+      broadcastFiles(selectedFiles);
+    });
+
     // --- Copy Conn Key to clipboard on click ---
     const connKeyDisplay = document.getElementById('connKeyDisplay');
     const copyMsg = document.getElementById('copyMsg');
@@ -602,6 +557,8 @@ function sendNextChunk() {
       }
     });
   };
+  window.onload = function() {
+    alert("This function is not working yet so please wait while I proceed its development. You can still use the receiver function to receive files from others.");
+  };
 </script>
 </body>
-</html>

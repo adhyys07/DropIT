@@ -84,6 +84,7 @@
   <h3 style="margin-bottom: 24px; color: #00ffae; text-shadow: 0 0 8px #00ffae55; font-size: 1.2em; font-weight: 400;">Choose your role</h3>
   <button onclick="send_redirect()">Start as Sender</button>
   <button onclick="recieve_redirect()">Start as Receiver</button>
+  <button onclick="broadcast_redirect()">Start Broadcast Sending</button>
   <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
 </div>
 <script>
@@ -92,6 +93,9 @@
    }
    function recieve_redirect(){
         window.location.href = 'reciever.html';
+   }
+   function broadcast_redirect(){
+        window.location.href = 'broadcast.html';
    }
 </script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
