@@ -1,33 +1,49 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
+  <title>P2P File Share</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode"></script>
-  <title>P2P File Share</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
+    :root {
+      --bg-gradient: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
+      --container-bg: rgba(20, 30, 40, 0.95);
+      --main-color: #00ffae;
+      --main-color-dark: #181f23;
+    }
+    * {
+      box-sizing: border-box;
+    }
     body {
       font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
-      background: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
-      height: 100vh;
+      background: var(--bg-gradient);
+      min-height: 100vh;
       margin: 0;
+      padding: 20px;
       display: flex;
       justify-content: center;
       align-items: center;
-      color: #00ffae;
+      color: var(--main-color);
       letter-spacing: 0.5px;
-      user-select: none;
+      transition: background 0.3s, color 0.3s;
     }
     .container {
-      background: rgba(20, 30, 40, 0.95);
+      background: var(--container-bg);
       border: 2px solid #00ffae44;
       border-radius: 20px;
-      padding: 32px 36px 32px 36px;
-      color: #00ffae;
+      padding: 32px 36px;
+      color: var(--main-color);
       max-width: 600px;
-      width: 90%;
+      width: 100%;
       box-shadow: 0 8px 32px #00ffae22, 0 0 0 2px #00ffae11 inset;
       text-shadow: 0 0 2px #00ffae88;
+      transition: background 0.3s, color 0.3s;
+      position: relative;
+      z-index: 1;
     }
     h2 {
       font-family: 'Fira Mono', 'Consolas', monospace;
@@ -47,7 +63,7 @@
       font-size: 1.1em;
       letter-spacing: 1px;
     }
-    input[type="text"], input[type="password"], input[type="number"], input[type="email"], input[type="search"], input[type="url"], input[type="tel"], input[type="file"], input[type="input"], input[type="button"], input[type="submit"], input[type="reset"], input[type="date"], input[type="datetime-local"], input[type="month"], input[type="time"], input[type="week"] {
+    input[type="text"] {
       width: 100%;
       padding: 10px;
       margin: 12px 0 18px 0;
@@ -79,12 +95,162 @@
       box-shadow: 0 2px 8px #00ffae22;
       transition: background 0.2s, color 0.2s, box-shadow 0.2s;
       letter-spacing: 1px;
+      position: relative;
+      z-index: 2;
     }
     button:hover {
       background: #181f23;
       color: #00ffae;
       box-shadow: 0 0 16px #00ffae99;
       border: 1.5px solid #00ffae;
+    }
+    #themeToggleBtn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      width: auto !important;
+      padding: 8px 18px;
+      font-size: 1.1em;
+      border-radius: 12px;
+      border: none;
+      box-shadow: 0 2px 12px #00ffae33;
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    #chatToggleBtn {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      z-index: 1000;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-size: 1.5em;
+      border: none;
+      box-shadow: 0 4px 16px #00ffae44;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    #chatDialog {
+      position: fixed;
+      bottom: 100px;
+      right: 30px;
+      z-index: 999;
+      background: var(--container-bg);
+      border: 2px solid #00ffae44;
+      border-radius: 16px;
+      padding: 20px;
+      width: 350px;
+      max-width: 90vw;
+      box-shadow: 0 8px 32px #00ffae33;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #chatMessages {
+      height: 200px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.1);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.9em;
+      margin-bottom: 10px;
+      border: 1px solid #00ffae33;
+    }
+    .chat-message {
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      word-wrap: break-word;
+    }
+    .sender-message {
+      background: rgba(0,191,174,0.1);
+      text-align: left;
+      color: #00bfae;
+    }
+    .receiver-message {
+      background: rgba(0,255,174,0.1);
+      text-align: right;
+      color: #00ffae;
+    }
+    .typing-indicator {
+      background: rgba(0,191,174,0.05);
+      text-align: left;
+      color: #00bfae;
+      font-style: italic;
+      opacity: 0.8;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.5; }
+      50% { opacity: 1; }
+      100% { opacity: 0.5; }
+    }
+    .typing-dots {
+      display: inline-block;
+    }
+    .typing-dots::after {
+      content: '';
+      animation: typingDots 1.5s infinite;
+    }
+    @keyframes typingDots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+      100% { content: ''; }
+    }
+    #chatInputContainer {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    #chatInput {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 2px solid #00ffae;
+      background: rgba(20,30,40,0.9);
+      color: #00ffae;
+      font-family: inherit;
+      font-size: 0.9em;
+      outline: none;
+      min-width: 0;
+    }
+    #chatSendBtn {
+      padding: 8px 16px;
+      width: auto;
+      margin: 0;
+      font-size: 0.9em;
+    }
+    .chat-notification {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      background: #ff4444;
+      color: white;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      font-size: 0.7em;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
     }
     #receivedFiles a, .download-link {
       color: #00ffae;
@@ -110,11 +276,13 @@
       margin-top: 15px;
       display: none;
     }
-    /* Processing dialog */
     #processingDialog {
       display: none;
       position: fixed;
-      top: 0; left: 0; width: 100vw; height: 100vh;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
       background: rgba(10,20,30,0.92);
       z-index: 9999;
       align-items: center;
@@ -134,27 +302,8 @@
       border: 2px solid #00ffae;
       text-shadow: 0 0 8px #00ffae99;
     }
-    .file-row {
-      display: flex;
-      align-items: center;
-      margin: 2px 0;
-      font-size: 1.08em;
-      letter-spacing: 0.5px;
-    }
-    .download-link {
-      color: #00ffae;
-      text-decoration: underline;
-      margin-left: 10px;
-      cursor: pointer;
-      font-size: 1em;
-      transition: color 0.2s;
-    }
-    .download-link:hover {
-      color: #fff;
-      text-shadow: 0 0 8px #00ffae;
-    }
     #progressContainer {
-      display:none;
+      display: none;
       margin: 20px auto 0 auto;
       background: rgba(0,255,174,0.03);
       border-radius: 50%;
@@ -164,20 +313,19 @@
       box-shadow: 0 0 24px #00ffae33;
     }
     #circularPercent {
-      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-      color:#00ffae;font-weight:bold;font-size:1.1em;white-space:nowrap;text-shadow:0 0 8px #00ffae99;letter-spacing:1px;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #00ffae;
+      font-weight: bold;
+      font-size: 1.1em;
+      white-space: nowrap;
+      text-shadow: 0 0 8px #00ffae99;
+      letter-spacing: 1px;
     }
     #circularBar {
       stroke: #00ffae;
-    }
-    #connKeyDisplay {
-      color: #00ffae;
-      font-family: inherit;
-      font-size: 1.1em;
-      letter-spacing: 1px;
-      margin-bottom: 0;
-      margin-top: 18px;
-      text-shadow: 0 0 8px #00ffae55;
     }
     .dotted-box {
       border: 2px dashed #00ffae;
@@ -190,7 +338,6 @@
       margin: 18px 0 0 0;
       letter-spacing: 1px;
     }
-    /* Fixed width for download buttons in received files */
     .fixed-download-btn {
       min-width: 120px;
       max-width: 120px;
@@ -204,10 +351,30 @@
   </style>
 </head>
 <body>
+<button id="themeToggleBtn">🌙 Dark Mode</button>
+
+<!-- Chat Button and Dialog -->
+<button id="chatToggleBtn">💬
+  <span id="chatNotification" class="chat-notification">1</span>
+</button>
+<div id="chatDialog">
+  <div style="font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+    <span>Chat with Sender</span>
+    <div style="display: flex; gap: 8px;">
+      <button id="clearChatBtn" style="background: none; border: none; color: #00ffae; font-size: 1.1em; cursor: pointer; width: auto; margin: 0; padding: 0;" title="Clear chat">🧹</button>
+      <button onclick="toggleChat()" style="background: none; border: none; color: #00ffae; font-size: 1.2em; cursor: pointer; width: auto; margin: 0; padding: 0;">✖</button>
+    </div>
+  </div>
+  <div id="chatMessages"></div>
+  <div id="chatInputContainer">
+    <input id="chatInput" type="text" placeholder="Type a message..." autocomplete="off" />
+    <button id="chatSendBtn">Send</button>
+  </div>
+</div>
+
 <div class="container">
   <h2>P2P File Share 🔐</h2>
-  <!-- Progress Circle (no speed/eta) -->
-  <div id="progressContainer" style="display:none; margin: 20px auto 0 auto; background: rgba(255,255,255,0.0); border-radius: 50%; width: 160px; height: 160px; position: relative;">
+  <div id="progressContainer">
     <svg id="circularProgress" width="160" height="160">
       <circle cx="80" cy="80" r="74" stroke="#eee" stroke-width="12" fill="none"/>
       <circle id="circularBar" cx="80" cy="80" r="74" stroke="#1abc9c" stroke-width="12" fill="none"
@@ -216,243 +383,454 @@
         stroke-dashoffset="464.95571273128947"
         transform="rotate(-90 80 80)"/>
     </svg>
-    <span id="circularPercent" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:#1abc9c;font-weight:bold;font-size:1.1em;white-space:nowrap;"></span>
+    <span id="circularPercent"></span>
   </div>
-  <div id="receivedFiles" style="margin-top:20px;"></div>
-  <input id="connKeyInput" placeholder="Enter Connection Key here" style="font-size:1.1em; letter-spacing:1px; width: 420px; max-width: 100%;" />
+  <div id="receivedFiles"></div>
+  <input id="connKeyInput" type="text" placeholder="Enter Connection Key here" />
   <button onclick="startReceiver()">Start receiving</button>
   <button onclick="scanQR()">📷 Scan QR</button>
-  <button id="downloadAllZipBtn" style="margin-top:10px; display:none;">Download All as ZIP</button>
-  <div id="qr-reader" style="width: 100%; margin-top: 15px; display: none;"></div>
-  <button id="disconnectBtn" style="margin-top:10px; display:none;">Disconnect & Start New</button>
+  <button id="downloadAllZipBtn" style="display:none;">Download All as ZIP</button>
+  <div id="qr-reader"></div>
+  <button id="disconnectBtn" style="display:none;">Disconnect & Start New</button>
   <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
 </div>
-
-<!-- Processing dialog -->
 <div id="processingDialog">
   <div>Processing...</div>
 </div>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 <script>
-  const socket = io();
-  let peer;
-  let isSender = false;
-  let receivedFiles = [];
-  let html5Qr;
-  let zipMode = false;
-  let transferStartTime = null;
+function setTheme(mode) {
+  if (mode === 'light') {
+    document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #f8fafc 0%, #e2e8f0 100%)');
+    document.documentElement.style.setProperty('--container-bg', 'rgba(255,255,255,0.97)');
+    document.documentElement.style.setProperty('--main-color', '#00bfae');
+    document.documentElement.style.setProperty('--main-color-dark', '#181f23');
+    document.getElementById('themeToggleBtn').innerText = '🌞 Light Mode';
+    document.getElementById('themeToggleBtn').style.background = 'linear-gradient(90deg, #00bfae 0%, #00ffae 100%)';
+    document.getElementById('themeToggleBtn').style.color = '#181f23';
+  } else {
+    document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%)');
+    document.documentElement.style.setProperty('--container-bg', 'rgba(20, 30, 40, 0.95)');
+    document.documentElement.style.setProperty('--main-color', '#00ffae');
+    document.documentElement.style.setProperty('--main-color-dark', '#181f23');
+    document.getElementById('themeToggleBtn').innerText = '🌙 Dark Mode';
+    document.getElementById('themeToggleBtn').style.background = 'linear-gradient(90deg, #00ffae 0%, #00bfae 100%)';
+    document.getElementById('themeToggleBtn').style.color = '#181f23';
+  }
+  localStorage.setItem('theme', mode);
+}
 
-  function askZipIfNeeded() {
-    if (receivedFiles.length === 5) {
-      if (confirm("You have received 5 or more files. Do you want to zip them?")) {
-        zipMode = true;
-        createAndDownloadZip();
-      }
+document.addEventListener('DOMContentLoaded', function() {
+  const themeBtn = document.getElementById('themeToggleBtn');
+  let currentTheme = localStorage.getItem('theme') || 'dark';
+  setTheme(currentTheme);
+  
+  themeBtn.addEventListener('click', function() {
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setTheme(currentTheme);
+  });
+});
+
+const socket = io();
+let peer;
+let receivedFiles = [];
+let html5Qr;
+let zipMode = false;
+let transferStartTime = null;
+let chatOpen = false;
+let unreadMessages = 0;
+let isTyping = false;
+let typingTimeout = null;
+let typingIndicatorElement = null;
+
+// Typing indicator functions
+function sendTypingIndicator(typing) {
+  if (peer && peer.connected) {
+    try {
+      peer.send(JSON.stringify({ type: 'typing', isTyping: typing }));
+    } catch (err) {
+      console.error('Failed to send typing indicator:', err);
     }
   }
+}
 
-  async function createAndDownloadZip() {
-    const zip = new JSZip();
-    for (const file of receivedFiles) {
-      const response = await fetch(file.url);
-      const blob = await response.blob();
-      zip.file(file.name, blob);
+function showTypingIndicator() {
+  if (!typingIndicatorElement) {
+    const chatMessages = document.getElementById('chatMessages');
+    typingIndicatorElement = document.createElement('div');
+    typingIndicatorElement.className = 'chat-message typing-indicator';
+    typingIndicatorElement.innerHTML = 'Sender is typing<span class="typing-dots"></span>';
+    chatMessages.appendChild(typingIndicatorElement);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+}
+
+function hideTypingIndicator() {
+  if (typingIndicatorElement) {
+    typingIndicatorElement.remove();
+    typingIndicatorElement = null;
+  }
+}
+
+function handleTypingStart() {
+  if (!isTyping) {
+    isTyping = true;
+    sendTypingIndicator(true);
+  }
+  
+  // Clear existing timeout
+  if (typingTimeout) {
+    clearTimeout(typingTimeout);
+  }
+  
+  // Set new timeout to stop typing indicator
+  typingTimeout = setTimeout(() => {
+    isTyping = false;
+    sendTypingIndicator(false);
+  }, 2000); // Stop typing after 2 seconds of inactivity
+}
+
+function handleTypingStop() {
+  if (typingTimeout) {
+    clearTimeout(typingTimeout);
+  }
+  if (isTyping) {
+    isTyping = false;
+    sendTypingIndicator(false);
+  }
+}
+
+// Chat Functions
+function toggleChat() {
+  const chatDialog = document.getElementById('chatDialog');
+  const chatBtn = document.getElementById('chatToggleBtn');
+  const notification = document.getElementById('chatNotification');
+  
+  chatOpen = !chatOpen;
+  
+  if (chatOpen) {
+    chatDialog.style.display = 'flex';
+    chatBtn.style.display = 'none';
+    unreadMessages = 0;
+    notification.style.display = 'none';
+    notification.textContent = '0';
+  } else {
+    chatDialog.style.display = 'none';
+    chatBtn.style.display = 'flex';
+  }
+}
+
+function addChatMessage(message, isSender = false) {
+  const chatMessages = document.getElementById('chatMessages');
+  const messageDiv = document.createElement('div');
+  messageDiv.className = `chat-message ${isSender ? 'sender-message' : 'receiver-message'}`;
+  messageDiv.textContent = `${isSender ? 'You' : 'Sender'}: ${message}`;
+  chatMessages.appendChild(messageDiv);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function clearChatMessages() {
+  const chatMessages = document.getElementById('chatMessages');
+  chatMessages.innerHTML = '';
+}
+
+function sendChatMessage() {
+  const chatInput = document.getElementById('chatInput');
+  const message = chatInput.value.trim();
+  
+  if (message && peer && peer.connected) {
+    try {
+      peer.send(JSON.stringify({ type: 'chat', message: message }));
+      addChatMessage(message, false);
+      chatInput.value = '';
+    } catch (err) {
+      console.error('Failed to send chat message:', err);
     }
-    const content = await zip.generateAsync({ type: "blob" });
-    const zipUrl = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = zipUrl;
-    a.download = "received_files.zip";
-    a.click();
   }
+}
 
-  function showProcessingDialog() {
-    document.getElementById('processingDialog').style.display = 'flex';
+function showProcessingDialog() {
+  document.getElementById('processingDialog').style.display = 'flex';
+}
+
+function hideProcessingDialog() {
+  document.getElementById('processingDialog').style.display = 'none';
+}
+
+function scanQR() {
+  const qrRegion = document.getElementById('qr-reader');
+  qrRegion.style.display = 'block';
+  html5Qr = new Html5Qrcode("qr-reader");
+  const config = { fps: 10, qrbox: 250 };
+  html5Qr.start({ facingMode: "environment" }, config,
+    qrCodeMessage => {
+      html5Qr.stop().then(() => {
+        qrRegion.style.display = 'none';
+        document.getElementById('connKeyInput').value = qrCodeMessage.trim();
+        showProcessingDialog();
+        setTimeout(() => {
+          startReceiver();
+        }, 100);
+      });
+    },
+    error => {}
+  ).catch(err => {
+    alert("Error starting camera: " + err);
+  });
+}
+
+function updateProgress(percent, receivedBytes, totalBytes) {
+  const container = document.getElementById('progressContainer');
+  container.style.display = 'block';
+  const circle = document.getElementById('circularBar');
+  const percentText = document.getElementById('circularPercent');
+  const radius = 74;
+  const circumference = 2 * Math.PI * radius;
+  if (circle) {
+    circle.style.strokeDasharray = circumference;
+    circle.style.strokeDashoffset = circumference - (percent / 100) * circumference;
   }
-  function hideProcessingDialog() {
-    document.getElementById('processingDialog').style.display = 'none';
+  if (percentText) {
+    percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
   }
+}
 
-  function scanQR() {
-    const qrRegion = document.getElementById('qr-reader');
-    qrRegion.style.display = 'block';
-
-    html5Qr = new Html5Qrcode("qr-reader");
-    const config = { fps: 10, qrbox: 250 };
-
-    html5Qr.start({ facingMode: "environment" }, config,
-      qrCodeMessage => {
-        html5Qr.stop().then(() => {
-          qrRegion.style.display = 'none';
-          document.getElementById('connKeyInput').value = qrCodeMessage.trim();
-          showProcessingDialog();
-          setTimeout(() => {
-            startReceiver();
-          }, 100);
-        });
-      },
-      error => {
-        // Silent fail (do nothing)
-      }
-    ).catch(err => {
-      alert("Error starting camera: " + err);
-    });
+function showReceivedFiles() {
+  const container = document.getElementById('receivedFiles');
+  container.innerHTML = "<h4>Received Files:</h4>";
+  if (receivedFiles.length === 0) {
+    container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
+    document.getElementById('downloadAllZipBtn').style.display = "none";
+    return;
   }
-
-  function updateProgress(percent, receivedBytes, totalBytes) {
-    // Circular progress only
-    const container = document.getElementById('progressContainer');
-    container.style.display = 'block';
-
-    const circle = document.getElementById('circularBar');
-    const percentText = document.getElementById('circularPercent');
-    const radius = 74;
-    const circumference = 2 * Math.PI * radius;
-    if (circle) {
-      circle.style.strokeDasharray = circumference;
-      circle.style.strokeDashoffset = circumference - (percent / 100) * circumference;
+  const maxFiles = 5;
+  for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
+    const file = receivedFiles[i];
+    const row = document.createElement('div');
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.marginBottom = "6px";
+    const nameSpan = document.createElement('span');
+    
+    // Show folder structure if file has relative path
+    if (file.relativePath && file.relativePath !== file.name) {
+      const isInFolder = file.relativePath.includes('/');
+      nameSpan.textContent = `${isInFolder ? '📁' : '📥'} ${file.relativePath}`;
+      nameSpan.title = `Full path: ${file.relativePath}`;
+    } else {
+      nameSpan.textContent = `📥 ${file.name}`;
     }
-    if (percentText) {
-      percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
-    }
-    // No speed or ETA display
+    
+    nameSpan.style.flex = "1";
+    row.appendChild(nameSpan);
+    const downloadBtn = document.createElement('button');
+    downloadBtn.textContent = "Download";
+    downloadBtn.className = "fixed-download-btn";
+    downloadBtn.style.marginLeft = "10px";
+    downloadBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = file.url;
+      // Use relative path for download filename if available
+      a.download = file.relativePath || file.name;
+      a.click();
+    };
+    row.appendChild(downloadBtn);
+    container.appendChild(row);
   }
+  if (receivedFiles.length > maxFiles) {
+    const more = document.createElement('p');
+    more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
+    more.style.fontStyle = 'italic';
+    more.style.color = '#eee';
+    container.appendChild(more);
+  }
+  document.getElementById('downloadAllZipBtn').style.display = "block";
+}
 
-  function showReceivedFiles() {
-    const container = document.getElementById('receivedFiles');
-    container.innerHTML = "<h4>Received Files:</h4>";
-    if (receivedFiles.length === 0) {
-      container.innerHTML += "<p style='font-style:italic;color:#eee;'>No files received yet.</p>";
-      document.getElementById('downloadAllZipBtn').style.display = "none";
+function askZipIfNeeded() {
+  if (receivedFiles.length === 5) {
+    if (confirm("You have received 5 or more files. Do you want to zip them?")) {
+      zipMode = true;
+      createAndDownloadZip();
+    }
+  }
+}
+
+async function createAndDownloadZip() {
+  const zip = new JSZip();
+  for (const file of receivedFiles) {
+    const response = await fetch(file.url);
+    const blob = await response.blob();
+    // Use relative path to preserve folder structure in ZIP
+    const zipPath = file.relativePath || file.name;
+    zip.file(zipPath, blob);
+  }
+  const content = await zip.generateAsync({ type: "blob" });
+  const zipUrl = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = zipUrl;
+  a.download = "received_files.zip";
+  a.click();
+}
+
+function startReceiver() {
+  const connKey = document.getElementById('connKeyInput').value.trim();
+  if (connKey.length !== 18) {
+    hideProcessingDialog();
+    return alert("❌ Invalid Conn Key");
+  }
+  
+  // Clean up previous connections
+  socket.off('deliver-offer');
+  if (peer && typeof peer.destroy === 'function') {
+    peer.destroy();
+  }
+  
+  // Create new peer connection
+  peer = new SimplePeer({ initiator: false, trickle: false });
+  
+  peer.on('signal', signal => {
+    socket.emit('send-answer', { signal, connKey });
+  });
+  
+  socket.emit('fetch-offer', { connKey });
+  
+  socket.on('deliver-offer', data => {
+    peer.signal(data.signal);
+  });
+  
+  peer.on('connect', () => {
+    hideProcessingDialog();
+    alert("✅ Connected! You can now receive files and chat.");
+    
+    // Show chat button
+    document.getElementById('chatToggleBtn').style.display = 'flex';
+    
+    // Hide connection UI elements
+    document.getElementById('disconnectBtn').style.display = "block";
+    const scanBtn = document.querySelector('button[onclick="scanQR()"]');
+    const startBtn = document.querySelector('button[onclick="startReceiver()"]');
+    if (scanBtn) scanBtn.style.display = "none";
+    if (startBtn) startBtn.style.display = "none";
+    document.getElementById('connKeyInput').style.display = "none";
+    
+    // Show initial file area
+    const receivedFilesDiv = document.getElementById('receivedFiles');
+    receivedFilesDiv.innerHTML = `<div class="dotted-box">No files received yet</div>`;
+  });
+  
+  let incomingChunks = [];
+  let incomingMeta = null;
+  
+  peer.on('data', data => {
+    let parsed = null;
+    try {
+      const text = new TextDecoder().decode(data);
+      parsed = JSON.parse(text);
+    } catch (err) {
+      // Not JSON, treat as binary data
+    }
+    
+    // Handle chat messages
+    if (parsed && parsed.type === 'chat') {
+      addChatMessage(parsed.message, true);
       return;
     }
-    const maxFiles = 5;
-    for (let i = 0; i < Math.min(receivedFiles.length, maxFiles); i++) {
-      const file = receivedFiles[i];
-      const row = document.createElement('div');
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.marginBottom = "6px";
-
-      const nameSpan = document.createElement('span');
-      nameSpan.textContent = `📥 ${file.name}`;
-      nameSpan.style.flex = "1";
-      row.appendChild(nameSpan);
-
-      const downloadBtn = document.createElement('button');
-      downloadBtn.textContent = "Download";
-      downloadBtn.className = "fixed-download-btn";
-      downloadBtn.style.marginLeft = "10px";
-      downloadBtn.onclick = () => {
-        const a = document.createElement('a');
-        a.href = file.url;
-        a.download = file.name;
-        a.click();
-      };
-      row.appendChild(downloadBtn);
-
-      container.appendChild(row);
-    }
-    if (receivedFiles.length > maxFiles) {
-      const more = document.createElement('p');
-      more.textContent = `+${receivedFiles.length - maxFiles} more file(s)...`;
-      more.style.fontStyle = 'italic';
-      more.style.color = '#eee';
-      container.appendChild(more);
-    }
-    document.getElementById('downloadAllZipBtn').style.display = "block";
-  }
-
-  function startReceiver() {
-    isSender = false;
-    const connKey = document.getElementById('connKeyInput').value.trim();
-    if (connKey.length !== 18) {
-      hideProcessingDialog();
-      return alert("❌ Invalid Conn Key");
-    }
-
-    peer = new SimplePeer({ initiator: false, trickle: false });
-
-    peer.on('signal', signal => {
-      socket.emit('send-answer', { signal });
-    });
-
-    socket.emit('fetch-offer', { connKey });
-
-    socket.on('deliver-offer', data => {
-      peer.signal(data.signal);
-    });
-
-    peer.on('connect', () => {
-      hideProcessingDialog();
-      alert("✅ Connected! You can now receive files.");
-      document.getElementById('disconnectBtn').style.display = "block";
-      document.querySelector('button[onclick="scanQR()"]').style.display = "none";
-      document.getElementById('connKeyInput').style.display = "none";
-      document.querySelector('button[onclick="startReceiver()"]').style.display = "none";
-      const receivedFilesDiv = document.getElementById('receivedFiles');
-      receivedFilesDiv.innerHTML = `
-        <div class="dotted-box">
-          No files received yet
-        </div>
-      `;
-    });
-
-    let incomingChunks = [];
-    let incomingMeta = null;
-
-    peer.on('data', data => {
-      try {
-        const text = new TextDecoder().decode(data);
-        const parsed = JSON.parse(text);
-        if (parsed.type === 'file-meta') {
-          incomingMeta = parsed.meta;
-          incomingChunks = [];
-          transferStartTime = null;
-          return;
-        }
-      } catch (err) {}
-
-      if (incomingMeta) {
-        incomingChunks.push(data);
-
-        const receivedSize = incomingChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
-        const percent = Math.min(100, (receivedSize / incomingMeta.size) * 100);
-        updateProgress(percent, receivedSize, incomingMeta.size);
-
-        if (receivedSize >= incomingMeta.size) {
-          const blob = new Blob(incomingChunks, { type: incomingMeta.type });
-          const url = URL.createObjectURL(blob);
-
-          receivedFiles.push({ name: incomingMeta.name, url });
-          showReceivedFiles();
-          askZipIfNeeded();
-
-          incomingChunks = [];
-          incomingMeta = null;
-        }
+    
+    // Handle typing indicator
+    if (parsed && parsed.type === 'typing') {
+      if (parsed.isTyping) {
+        showTypingIndicator();
+      } else {
+        hideTypingIndicator();
       }
-    });
-  }
-  document.getElementById('disconnectBtn').onclick = function() {
-    location.reload();
-  };
-  document.getElementById('downloadAllZipBtn').onclick = async function() {
-    if (receivedFiles.length === 0) return;
-    const zip = new JSZip();
-    for (const file of receivedFiles) {
-      const response = await fetch(file.url);
-      const blob = await response.blob();
-      zip.file(file.name, blob);
+      return;
     }
-    const content = await zip.generateAsync({ type: "blob" });
-    const zipUrl = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = zipUrl;
-    a.download = "received_files.zip";
-    a.click();
-  };
+    
+    if (parsed && parsed.type === 'file-meta') {
+      incomingMeta = parsed.meta;
+      incomingChunks = [];
+      transferStartTime = Date.now();
+      return;
+    }
+    
+    if (incomingMeta) {
+      incomingChunks.push(data);
+      const receivedSize = incomingChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+      const percent = Math.min(100, (receivedSize / incomingMeta.size) * 100);
+      updateProgress(percent, receivedSize, incomingMeta.size);
+      
+      if (receivedSize >= incomingMeta.size) {
+        const blob = new Blob(incomingChunks, { type: incomingMeta.type });
+        const url = URL.createObjectURL(blob);
+        receivedFiles.push({ 
+          name: incomingMeta.name, 
+          url: url,
+          relativePath: incomingMeta.relativePath || incomingMeta.name
+        });
+        showReceivedFiles();
+        askZipIfNeeded();
+        incomingChunks = [];
+        incomingMeta = null;
+      }
+    }
+  });
+  
+  peer.on('error', err => {
+    hideProcessingDialog();
+    alert("❌ Connection error: " + err.message);
+  });
+}
+
+// Event Listeners
+document.getElementById('chatToggleBtn').addEventListener('click', toggleChat);
+document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
+document.getElementById('chatInput').addEventListener('keypress', function(e) {
+  if (e.key === 'Enter') {
+    sendChatMessage();
+  }
+});
+
+// Add typing indicator event listeners
+document.getElementById('chatInput').addEventListener('input', handleTypingStart);
+document.getElementById('chatInput').addEventListener('blur', handleTypingStop);
+
+document.getElementById('disconnectBtn').addEventListener('click', function() {
+  location.reload();
+});
+
+document.getElementById('downloadAllZipBtn').addEventListener('click', async function() {
+  if (receivedFiles.length === 0) return;
+  const zip = new JSZip();
+  for (const file of receivedFiles) {
+    const response = await fetch(file.url);
+    const blob = await response.blob();
+    // Use relative path to preserve folder structure in ZIP
+    const zipPath = file.relativePath || file.name;
+    zip.file(zipPath, blob);
+  }
+  const content = await zip.generateAsync({ type: "blob" });
+  const zipUrl = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = zipUrl;
+  a.download = "received_files.zip";
+  a.click();
+});
+
+window.addEventListener('DOMContentLoaded', function() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const key = urlParams.get('key');
+  if (key && key.length === 18) {
+    document.getElementById('connKeyInput').value = key;
+    showProcessingDialog();
+    setTimeout(() => {
+      startReceiver();
+    }, 100);
+  }
+});
+
+window.onload = function() {
+  document.getElementById('clearChatBtn').addEventListener('click', clearChatMessages);
+}
 </script>
 </body>
 </html>

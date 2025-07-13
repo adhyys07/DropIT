@@ -5,28 +5,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
+    :root {
+      --bg-gradient: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
+      --container-bg: rgba(20, 30, 40, 0.95);
+      --main-color: #00ffae;
+      --main-color-dark: #181f23;
+    }
     body {
       font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
-      background: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
+      background: var(--bg-gradient);
       height: 100vh;
       margin: 0;
       display: flex;
       justify-content: center;
       align-items: center;
-      color: #00ffae;
+      color: var(--main-color);
       letter-spacing: 0.5px;
       user-select: none;
+      transition: background 0.3s, color 0.3s;
     }
     .container {
-      background: rgba(20, 30, 40, 0.95);
+      background: var(--container-bg);
       border: 2px solid #00ffae44;
       border-radius: 20px;
       padding: 32px 36px 32px 36px;
-      color: #00ffae;
+      color: var(--main-color);
       max-width: 600px;
       width: 90%;
       box-shadow: 0 8px 32px #00ffae22, 0 0 0 2px #00ffae11 inset;
       text-shadow: 0 0 2px #00ffae88;
+      transition: background 0.3s, color 0.3s;
     }
     h2 {
       font-family: 'Fira Mono', 'Consolas', monospace;
@@ -79,23 +87,71 @@
   </style>
 </head>
 <body>
+<button id="themeToggleBtn" style="position:fixed;top:24px;right:32px;z-index:1000;width:auto;padding:8px 18px;font-size:1.1em;border-radius:12px;border:none;box-shadow:0 2px 12px #00ffae33;background:linear-gradient(90deg, #00ffae 0%, #00bfae 100%);color:#181f23;font-family:'Fira Mono','Consolas',monospace;cursor:pointer;transition:background 0.2s,color 0.2s;">🌙 Dark Mode</button>
 <div class="container">
   <h2>P2P File Share <span style="font-size:0.8em;">&#128274;</span></h2>
   <h3 style="margin-bottom: 24px; color: #00ffae; text-shadow: 0 0 8px #00ffae55; font-size: 1.2em; font-weight: 400;">Choose your role</h3>
   <button onclick="send_redirect()">Start as Sender</button>
   <button onclick="recieve_redirect()">Start as Receiver</button>
-  <button onclick="broadcast_redirect()">Start Broadcast Sending</button>
   <p id="connKeyDisplay" style="word-break: break-word; margin-top: 15px;"></p>
 </div>
 <script>
+  // --- Theme Toggle Logic ---
+  function setTheme(mode) {
+    if (mode === 'light') {
+      document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #f8fafc 0%, #e2e8f0 100%)');
+      document.documentElement.style.setProperty('--container-bg', 'rgba(255,255,255,0.97)');
+      document.documentElement.style.setProperty('--main-color', '#00bfae');
+      document.documentElement.style.setProperty('--main-color-dark', '#181f23');
+      document.getElementById('themeToggleBtn').innerText = '🌞 Light Mode';
+    } else {
+      document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%)');
+      document.documentElement.style.setProperty('--container-bg', 'rgba(20, 30, 40, 0.95)');
+      document.documentElement.style.setProperty('--main-color', '#00ffae');
+      document.documentElement.style.setProperty('--main-color-dark', '#181f23');
+      document.getElementById('themeToggleBtn').innerText = '🌙 Dark Mode';
+    }
+    localStorage.setItem('theme', mode);
+  }
+  window.onload = function() {
+    const themeBtn = document.getElementById('themeToggleBtn');
+    let currentTheme = localStorage.getItem('theme') || 'dark';
+    setTheme(currentTheme);
+    themeBtn.onclick = function() {
+      currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      setTheme(currentTheme);
+    };
+    // ...existing code...
+  }
    function send_redirect(){
         window.location.href = 'sender.html';
    }
    function recieve_redirect(){
         window.location.href = 'reciever.html';
    }
-   function broadcast_redirect(){
-        window.location.href = 'broadcast.html';
+   // ...existing code...
+
+   // Share Link logic
+   function share_link() {
+     // Prompt for connection key
+     let connKey = prompt('Enter the connection key to share:');
+     if (!connKey || connKey.length !== 18) {
+       alert('Please enter a valid 18-character connection key.');
+       return;
+     }
+     // Generate link
+     let link = window.location.origin + '/reciever.html?key=' + encodeURIComponent(connKey);
+     document.getElementById('shareLinkInput').value = link;
+     document.getElementById('shareLinkInput').style.display = 'block';
+     document.getElementById('copyLinkBtn').style.display = 'inline-block';
+   }
+
+   function copy_link() {
+     let input = document.getElementById('shareLinkInput');
+     input.select();
+     input.setSelectionRange(0, 99999);
+     document.execCommand('copy');
+     alert('Link copied to clipboard!');
    }
 </script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>

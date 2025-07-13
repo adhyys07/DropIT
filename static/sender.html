@@ -5,34 +5,62 @@
   <title>P2P File Share</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
+    :root {
+      --bg-gradient: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
+      --container-bg: rgba(20, 30, 40, 0.95);
+      --container-border: #00ffae44;
+      --container-shadow: #00ffae22;
+      --container-inset: #00ffae11;
+      --container-text-shadow: #00ffae88;
+      --main-color: #00ffae;
+      --main-color-dark: #181f23;
+      --button-bg: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      --button-hover-bg: #181f23;
+      --button-hover-color: #00ffae;
+      --button-hover-border: #00ffae;
+      --remove-btn-bg: #181f23;
+      --remove-btn-color: #00ffae;
+      --remove-btn-hover-bg: #00ffae;
+      --remove-btn-hover-color: #181f23;
+      --progress-bg: rgba(0,255,174,0.03);
+      --progress-bar-bg: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      --progress-bar-shadow: #00ffae99;
+      --progress-container-bg: rgba(0,255,174,0.08);
+      --progress-container-shadow: #00ffae33;
+      --file-row-bg: inherit;
+      --file-row-color: inherit;
+      --selection-bg: #00ffae44;
+    }
     body {
       font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
-      background: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
+      background: var(--bg-gradient);
       height: 100vh;
       margin: 0;
       display: flex;
       justify-content: center;
       align-items: center;
-      color: #00ffae;
+      color: var(--main-color);
       letter-spacing: 0.5px;
       user-select: none;
+      transition: background 0.3s, color 0.3s;
     }
     .container {
-      background: rgba(20, 30, 40, 0.95);
-      border: 2px solid #00ffae44;
+      background: var(--container-bg);
+      border: 2px solid var(--container-border);
       border-radius: 20px;
       padding: 32px 36px 32px 36px;
-      color: #00ffae;
+      color: var(--main-color);
       max-width: 600px;
       width: 90%;
-      box-shadow: 0 8px 32px #00ffae22, 0 0 0 2px #00ffae11 inset;
-      text-shadow: 0 0 2px #00ffae88;
+      box-shadow: 0 8px 32px var(--container-shadow), 0 0 0 2px var(--container-inset) inset;
+      text-shadow: 0 0 2px var(--container-text-shadow);
+      transition: background 0.3s, color 0.3s;
     }
     h2 {
       font-family: 'Fira Mono', 'Consolas', monospace;
       font-size: 2em;
-      background: #00ffae;
-      color: #181f23;
+      background: var(--main-color);
+      color: var(--main-color-dark);
       display: inline-block;
       padding: 4px 16px;
       border-radius: 8px;
@@ -42,8 +70,8 @@
       text-shadow: none;
     }
     button {
-      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
-      color: #181f23;
+      background: var(--button-bg);
+      color: var(--main-color-dark);
       font-family: 'Fira Mono', 'Consolas', monospace;
       font-weight: bold;
       cursor: pointer;
@@ -54,23 +82,151 @@
       border-radius: 10px;
       border: none;
       outline: none;
-      box-shadow: 0 2px 8px #00ffae22;
+      box-shadow: 0 2px 8px var(--container-shadow);
       transition: background 0.2s, color 0.2s, box-shadow 0.2s;
       letter-spacing: 1px;
     }
     button:hover {
-      background: #181f23;
-      color: #00ffae;
+      background: var(--button-hover-bg);
+      color: var(--button-hover-color);
       box-shadow: 0 0 16px #00ffae99;
-      border: 1.5px solid #00ffae;
+      border: 1.5px solid var(--button-hover-border);
+    }
+    #themeToggleBtn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      width: auto !important;
+      padding: 8px 18px;
+      font-size: 1.1em;
+      border-radius: 12px;
+      border: none;
+      box-shadow: 0 2px 12px #00ffae33;
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-family: 'Fira Mono', 'Consolas', monospace;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    #chatToggleBtn {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      z-index: 1000;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      color: #181f23;
+      font-size: 1.5em;
+      border: none;
+      box-shadow: 0 4px 16px #00ffae44;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    #chatDialog {
+      position: fixed;
+      bottom: 100px;
+      right: 30px;
+      z-index: 999;
+      background: var(--container-bg);
+      border: 2px solid #00ffae44;
+      border-radius: 16px;
+      padding: 20px;
+      width: 350px;
+      max-width: 90vw;
+      box-shadow: 0 8px 32px #00ffae33;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #chatMessages {
+      height: 200px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.1);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.9em;
+      margin-bottom: 10px;
+      border: 1px solid #00ffae33;
+    }
+    .chat-message {
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      word-wrap: break-word;
+    }
+    .sender-message {
+      background: rgba(0,255,174,0.1);
+      text-align: right;
+      color: #00ffae;
+    }
+    .receiver-message {
+      background: rgba(0,191,174,0.1);
+      text-align: left;
+      color: #00bfae;
+    }
+    .typing-indicator {
+      background: rgba(0,191,174,0.05);
+      text-align: left;
+      color: #00bfae;
+      font-style: italic;
+      opacity: 0.8;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.5; }
+      50% { opacity: 1; }
+      100% { opacity: 0.5; }
+    }
+    .typing-dots {
+      display: inline-block;
+    }
+    .typing-dots::after {
+      content: '';
+      animation: typingDots 1.5s infinite;
+    }
+    @keyframes typingDots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+      100% { content: ''; }
+    }
+    #chatInputContainer {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    #chatInput {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 2px solid #00ffae;
+      background: rgba(20,30,40,0.9);
+      color: #00ffae;
+      font-family: inherit;
+      font-size: 0.9em;
+      outline: none;
+      min-width: 0;
+    }
+    #chatSendBtn {
+      padding: 8px 16px;
+      width: auto;
+      margin: 0;
+      font-size: 0.9em;
     }
     .remove-single-btn {
       width: auto;
       padding: 2px 8px;
       font-size: 1rem;
-      background: #181f23;
-      color: #00ffae;
-      border: 1px solid #00ffae;
+      background: var(--remove-btn-bg);
+      color: var(--remove-btn-color);
+      border: 1px solid var(--main-color);
       border-radius: 5px;
       cursor: pointer;
       margin-left: 10px;
@@ -78,8 +234,8 @@
       transition: background 0.2s, color 0.2s;
     }
     .remove-single-btn:hover {
-      background: #00ffae;
-      color: #181f23;
+      background: var(--remove-btn-hover-bg);
+      color: var(--remove-btn-hover-color);
     }
     .file-row {
       display: flex;
@@ -87,23 +243,25 @@
       margin: 2px 0;
       font-size: 1.08em;
       letter-spacing: 0.5px;
+      background: var(--file-row-bg);
+      color: var(--file-row-color);
     }
     #progressCircleContainer {
       margin: 20px auto 20px auto;
-      background: rgba(0,255,174,0.03);
+      background: var(--progress-bg);
       border-radius: 50%;
       width: 160px;
       height: 160px;
       position: relative;
       display: none;
-      box-shadow: 0 0 24px #00ffae33;
+      box-shadow: 0 0 24px var(--progress-container-shadow);
     }
     #circularPercent {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%,-50%);
-      color: #00ffae;
+      color: var(--main-color);
       font-weight: bold;
       font-size: 1.1em;
       white-space: nowrap;
@@ -112,11 +270,11 @@
     }
     #dropZone {
       display:none;
-      border: 2px dashed #00ffae;
+      border: 2px dashed var(--main-color);
       border-radius: 12px;
       padding: 30px;
       text-align: center;
-      color: #00ffae;
+      color: var(--main-color);
       margin-bottom: 10px;
       background: rgba(0,255,174,0.07);
       cursor:pointer;
@@ -124,12 +282,31 @@
       font-family: inherit;
       letter-spacing: 1px;
       transition: background 0.2s, border 0.2s;
-      box-shadow: 0 0 12px #00ffae22;
+      box-shadow: 0 0 12px var(--progress-container-shadow);
     }
     #dropZone:hover, #dropZone.dragover {
       background: rgba(0,255,174,0.13);
-      border: 2px solid #00ffae;
-      color: #181f23;
+      border: 2px solid var(--main-color);
+      color: var(--main-color-dark);
+    }
+    #selectFilesBtn, #selectFolderBtn {
+      background: var(--button-bg);
+      color: var(--main-color-dark);
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 0.95em;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+      letter-spacing: 0.5px;
+    }
+    #selectFilesBtn:hover, #selectFolderBtn:hover {
+      background: var(--button-hover-bg);
+      color: var(--button-hover-color);
+      border: 1.5px solid var(--button-hover-border);
+      box-shadow: 0 0 12px var(--progress-bar-shadow);
     }
     #processingDialog {
       display: none;
@@ -141,21 +318,21 @@
       justify-content: center;
     }
     #processingDialog > div {
-      background: #181f23;
-      color: #00ffae;
+      background: var(--main-color-dark);
+      color: var(--main-color);
       padding: 30px 40px;
       border-radius: 16px;
       font-size: 1.3em;
       font-weight: bold;
-      box-shadow: 0 8px 32px #00ffae33;
+      box-shadow: 0 8px 32px var(--progress-container-shadow);
       font-family: inherit;
       letter-spacing: 1.5px;
       text-align: center;
-      border: 2px solid #00ffae;
+      border: 2px solid var(--main-color);
       text-shadow: 0 0 8px #00ffae99;
     }
     #connKeyDisplay, #connKeyDisplay + p {
-      color: #00ffae;
+      color: var(--main-color);
       font-family: inherit;
       font-size: 1.1em;
       letter-spacing: 1px;
@@ -175,55 +352,73 @@
       left: 50%;
       top: -28px;
       transform: translateX(-50%);
-      background: #181f23;
-      color: #00ffae;
+      background: var(--main-color-dark);
+      color: var(--main-color);
       font-size: 1em;
       padding: 4px 16px;
       border-radius: 8px;
-      box-shadow: 0 2px 12px #00ffae33;
+      box-shadow: 0 2px 12px var(--progress-container-shadow);
       z-index: 10;
       text-shadow: 0 0 8px #00ffae99;
       pointer-events: none;
     }
     #qrCanvas {
-      background: #181f23;
+      background: var(--main-color-dark);
       border-radius: 10px;
-      box-shadow: 0 0 16px #00ffae33;
+      box-shadow: 0 0 16px var(--progress-container-shadow);
       margin-bottom: 10px;
     }
     #progressContainer {
       display:none;
       margin-top:15px;
-      background: rgba(0,255,174,0.08);
+      background: var(--progress-container-bg);
       border-radius: 10px;
       overflow: hidden;
       height: 20px;
-      box-shadow: 0 0 8px #00ffae33;
+      box-shadow: 0 0 8px var(--progress-container-shadow);
     }
     #progressBar {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
+      background: var(--progress-bar-bg);
       transition: width 0.3s;
-      box-shadow: 0 0 8px #00ffae99;
+      box-shadow: 0 0 8px var(--progress-bar-shadow);
     }
     #transferStats {
       margin-top:10px;
       font-size:1em;
-      color:#00ffae;
+      color:var(--main-color);
       text-align:center;
       display:none;
     }
     ::selection {
-      background: #00ffae44;
+      background: var(--selection-bg);
     }
   </style>
 </head>
 <body>
+<button id="themeToggleBtn">🌙 Dark Mode</button>
+
+<!-- Chat Button and Dialog -->
+<button id="chatToggleBtn">💬</button>
+<div id="chatDialog">
+  <div style="font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+    <span>Chat with Receiver</span>
+    <div style="display: flex; gap: 8px;">
+      <button id="clearChatBtn" style="background: none; border: none; color: #00ffae; font-size: 1.1em; cursor: pointer; width: auto; margin: 0; padding: 0;" title="Clear chat">🧹</button>
+      <button onclick="toggleChat()" style="background: none; border: none; color: #00ffae; font-size: 1.2em; cursor: pointer; width: auto; margin: 0; padding: 0;">✖</button>
+    </div>
+  </div>
+  <div id="chatMessages"></div>
+  <div id="chatInputContainer">
+    <input id="chatInput" type="text" placeholder="Type a message..." autocomplete="off" />
+    <button id="chatSendBtn">Send</button>
+  </div>
+</div>
+
 <div class="container">
   <h2>P2P File Share <span style="font-size:0.8em;">&#128274;</span></h2>
   <!-- Circular Progress Indicator (hidden by default, shown only during transfer) -->
-<!-- Replace the #progressCircleContainer block with the following: -->
 <div id="progressCircleContainer" style="position:relative;">
   <svg id="circularProgress" width="160" height="160">
     <circle cx="80" cy="80" r="74" stroke="#222c" stroke-width="12" fill="none"/>
@@ -253,13 +448,19 @@
 </div>
   <canvas id="qrCanvas" style="margin-top: 10px; display: none;"></canvas>
   <div class="filePreview" id="filePreview"></div>
-  <div id="dropZone">Drop files here or click to select</div>
+  <div id="dropZone">Drop files/folders here or click to select</div>
+  <div id="selectButtonsContainer" style="display: none; flex-direction: row; gap: 10px; margin-top: 10px;">
+    <button id="selectFilesBtn" style="flex: 1;">📄 Select Files</button>
+    <button id="selectFolderBtn" style="flex: 1;">📁 Select Folder</button>
+  </div>
   <button id="removeBtn" style="display: none; margin-top:10px;">Remove All Files</button>
   <button id="sendBtn" style="display: none; margin-top:10px;">Send File</button>
   <button id="newInstanceBtn" style="margin-top:10px; display:none;">Start New Instance</button>
   <p style="position: relative; display: inline-block; width: 100%; margin: 0;">
     <span id="copyMsg">Copied!</span>
+    <span id="copyLinkFloatingMsg" style="display:none;position:absolute;left:50%;top:-38px;transform:translateX(-50%);background:#181f23;color:#00ffae;font-size:1em;padding:6px 20px;border-radius:10px;box-shadow:0 2px 12px #00ffae33;z-index:20;text-shadow:0 0 8px #00ffae99;pointer-events:none;">Copied! Share it with client to start sharing</span>
     <span id="connKeyDisplay" style="word-break: break-word; margin-top: 15px; cursor: pointer;" title="Click to copy"></span>
+    <button id="copyLinkBtn" style="margin-top:10px;display:none;">Copy Link</button>
   </p>
   <div id="progressContainer">
     <div id="progressBar"></div>
@@ -275,6 +476,9 @@
   <div>Processing...</div>
 </div>
 
+<!-- Add hidden folder input for folder selection -->
+<input id="hiddenFolderInput" type="file" webkitdirectory multiple style="display:none;" />
+
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
 
@@ -285,6 +489,170 @@
   let selectedFiles = [];
   let hiddenFileInput = null; // For click-to-select
   let transferStartTime = null;
+  let chatOpen = false;
+  let isTyping = false;
+  let typingTimeout = null;
+  let typingIndicatorElement = null;
+
+  // Typing indicator functions
+  function sendTypingIndicator(typing) {
+    if (peer && peer.connected) {
+      try {
+        peer.send(JSON.stringify({ type: 'typing', isTyping: typing }));
+      } catch (err) {
+        console.error('Failed to send typing indicator:', err);
+      }
+    }
+  }
+
+  function showTypingIndicator() {
+    if (!typingIndicatorElement) {
+      const chatMessages = document.getElementById('chatMessages');
+      typingIndicatorElement = document.createElement('div');
+      typingIndicatorElement.className = 'chat-message typing-indicator';
+      typingIndicatorElement.innerHTML = 'Receiver is typing<span class="typing-dots"></span>';
+      chatMessages.appendChild(typingIndicatorElement);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+  }
+
+  function hideTypingIndicator() {
+    if (typingIndicatorElement) {
+      typingIndicatorElement.remove();
+      typingIndicatorElement = null;
+    }
+  }
+
+  function handleTypingStart() {
+    if (!isTyping) {
+      isTyping = true;
+      sendTypingIndicator(true);
+    }
+    
+    // Clear existing timeout
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+    }
+    
+    // Set new timeout to stop typing indicator
+    typingTimeout = setTimeout(() => {
+      isTyping = false;
+      sendTypingIndicator(false);
+    }, 2000); // Stop typing after 2 seconds of inactivity
+  }
+
+  function handleTypingStop() {
+    if (typingTimeout) {
+      clearTimeout(typingTimeout);
+    }
+    if (isTyping) {
+      isTyping = false;
+      sendTypingIndicator(false);
+    }
+  }
+
+  // Chat Functions
+  function toggleChat() {
+    const chatDialog = document.getElementById('chatDialog');
+    const chatBtn = document.getElementById('chatToggleBtn');
+    
+    chatOpen = !chatOpen;
+    
+    if (chatOpen) {
+      chatDialog.style.display = 'flex';
+      chatBtn.style.display = 'none';
+    } else {
+      chatDialog.style.display = 'none';
+      chatBtn.style.display = 'flex';
+    }
+  }
+
+  function addChatMessage(message, isSender = true) {
+    const chatMessages = document.getElementById('chatMessages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${isSender ? 'sender-message' : 'receiver-message'}`;
+    messageDiv.textContent = `${isSender ? 'You' : 'Receiver'}: ${message}`;
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function clearChatMessages() {
+    const chatMessages = document.getElementById('chatMessages');
+    chatMessages.innerHTML = '';
+  }
+
+  function sendChatMessage() {
+    const chatInput = document.getElementById('chatInput');
+    const message = chatInput.value.trim();
+    
+    if (message && peer && peer.connected) {
+      try {
+        peer.send(JSON.stringify({ type: 'chat', message: message }));
+        addChatMessage(message, true);
+        chatInput.value = '';
+      } catch (err) {
+        console.error('Failed to send chat message:', err);
+      }
+    }
+  }
+
+  // --- Theme Toggle Logic ---
+  function setTheme(mode) {
+    if (mode === 'light') {
+      document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #f8fafc 0%, #e2e8f0 100%)');
+      document.documentElement.style.setProperty('--container-bg', 'rgba(255,255,255,0.97)');
+      document.documentElement.style.setProperty('--container-border', '#00bfae44');
+      document.documentElement.style.setProperty('--container-shadow', '#00bfae22');
+      document.documentElement.style.setProperty('--container-inset', '#00bfae11');
+      document.documentElement.style.setProperty('--container-text-shadow', '#00bfae88');
+      document.documentElement.style.setProperty('--main-color', '#00bfae');
+      document.documentElement.style.setProperty('--main-color-dark', '#181f23');
+      document.documentElement.style.setProperty('--button-bg', 'linear-gradient(90deg, #00bfae 0%, #00ffae 100%)');
+      document.documentElement.style.setProperty('--button-hover-bg', '#e2e8f0');
+      document.documentElement.style.setProperty('--button-hover-color', '#00bfae');
+      document.documentElement.style.setProperty('--button-hover-border', '#00bfae');
+      document.documentElement.style.setProperty('--remove-btn-bg', '#e2e8f0');
+      document.documentElement.style.setProperty('--remove-btn-color', '#00bfae');
+      document.documentElement.style.setProperty('--remove-btn-hover-bg', '#00bfae');
+      document.documentElement.style.setProperty('--remove-btn-hover-color', '#e2e8f0');
+      document.documentElement.style.setProperty('--progress-bg', 'rgba(0,191,174,0.03)');
+      document.documentElement.style.setProperty('--progress-bar-bg', 'linear-gradient(90deg, #00bfae 0%, #00ffae 100%)');
+      document.documentElement.style.setProperty('--progress-bar-shadow', '#00bfae99');
+      document.documentElement.style.setProperty('--progress-container-bg', 'rgba(0,191,174,0.08)');
+      document.documentElement.style.setProperty('--progress-container-shadow', '#00bfae33');
+      document.documentElement.style.setProperty('--file-row-bg', 'inherit');
+      document.documentElement.style.setProperty('--file-row-color', 'inherit');
+      document.documentElement.style.setProperty('--selection-bg', '#00bfae44');
+      document.getElementById('themeToggleBtn').innerText = '🌞 Light Mode';
+    } else {
+      document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%)');
+      document.documentElement.style.setProperty('--container-bg', 'rgba(20, 30, 40, 0.95)');
+      document.documentElement.style.setProperty('--container-border', '#00ffae44');
+      document.documentElement.style.setProperty('--container-shadow', '#00ffae22');
+      document.documentElement.style.setProperty('--container-inset', '#00ffae11');
+      document.documentElement.style.setProperty('--container-text-shadow', '#00ffae88');
+      document.documentElement.style.setProperty('--main-color', '#00ffae');
+      document.documentElement.style.setProperty('--main-color-dark', '#181f23');
+      document.documentElement.style.setProperty('--button-bg', 'linear-gradient(90deg, #00ffae 0%, #00bfae 100%)');
+      document.documentElement.style.setProperty('--button-hover-bg', '#181f23');
+      document.documentElement.style.setProperty('--button-hover-color', '#00ffae');
+      document.documentElement.style.setProperty('--button-hover-border', '#00ffae');
+      document.documentElement.style.setProperty('--remove-btn-bg', '#181f23');
+      document.documentElement.style.setProperty('--remove-btn-color', '#00ffae');
+      document.documentElement.style.setProperty('--remove-btn-hover-bg', '#00ffae');
+      document.documentElement.style.setProperty('--remove-btn-hover-color', '#181f23');
+      document.documentElement.style.setProperty('--progress-bg', 'rgba(0,255,174,0.03)');
+      document.documentElement.style.setProperty('--progress-bar-bg', 'linear-gradient(90deg, #00ffae 0%, #00bfae 100%)');
+      document.documentElement.style.setProperty('--progress-bar-shadow', '#00ffae99');
+      document.documentElement.style.setProperty('--progress-container-bg', 'rgba(0,255,174,0.08)');
+      document.documentElement.style.setProperty('--progress-container-shadow', '#00ffae33');
+      document.documentElement.style.setProperty('--file-row-bg', 'inherit');
+      document.documentElement.style.setProperty('--file-row-color', 'inherit');
+      document.documentElement.style.setProperty('--selection-bg', '#00ffae44');
+      document.getElementById('themeToggleBtn').innerText = '🌙 Dark Mode';
+    }
+    localStorage.setItem('theme', mode);
+  }
 
   function showProcessingDialog() {
     document.getElementById('processingDialog').style.display = 'flex';
@@ -316,9 +684,6 @@
     }
     // Always show the circle during and after transfer
     circleContainer.style.display = "block";
-    // Do not hide the circle or clear the text after 100%
-    // container.style.display = 'none'; // Do not hide container
-    // bar.style.width = '0%'; // Do not reset bar
 
     // --- Transfer speed and ETA ---
     const statsDiv = document.getElementById('transferStats');
@@ -343,13 +708,7 @@
 
       const remaining = updateProgress.totalBytes - bytesSent;
       const eta = speed > 0 ? remaining / speed : 0;
-      // Always show stats, even after complete
       etaSpan.textContent = percent >= 100 ? "ETA: 0s" : `ETA: ${eta > 0 ? Math.ceil(eta) + "s" : "0s"}`;
-      // Do NOT hide statsDiv after completion
-      if (percent >= 100) {
-        // Optionally, reset transferStartTime if you want to start fresh for next transfer
-        // transferStartTime = null;
-      }
     } else {
       statsDiv.style.display = "none";
     }
@@ -359,23 +718,24 @@
     isSender = true;
     peer = new SimplePeer({ initiator: true, trickle: false });
 
-    // Show placeholder details instantly for faster feedback
+    // Show placeholder key instantly for faster feedback
+    document.getElementById('connKeyDisplay').innerText = "Conn Key: ...";
+    const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
+    if (!nextElem || !nextElem.textContent.includes("Share this key")) {
+      document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
+    }
+    const qrCanvas = document.getElementById('qrCanvas');
+    qrCanvas.style.display = "block";
+    new QRious({
+      element: qrCanvas,
+      value: "...",
+      size: 200
+    });
+
+    // Continue with signaling as before
     peer.on('signal', signal => {
       if (signal && signal.type === "offer") {
         showProcessingDialog();
-        document.getElementById('connKeyDisplay').innerText = "Generating Conn Key...";
-        // Remove any previous instructions to avoid duplicates
-        const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-        if (!nextElem || !nextElem.textContent.includes("Share this key")) {
-          document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
-        }
-        const qrCanvas = document.getElementById('qrCanvas');
-        qrCanvas.style.display = "block";
-        new QRious({
-          element: qrCanvas,
-          value: "Generating...",
-          size: 200
-        });
       }
       socket.emit('register-offer', { signal });
     });
@@ -396,6 +756,29 @@
         value: data.connKey,
         size: 200
       });
+      // Show only Copy Link button
+      document.getElementById('copyLinkBtn').style.display = 'inline-block';
+      // ...existing code...
+document.getElementById('copyLinkBtn').onclick = function() {
+  let link = 'https://dropit-n1pk.onrender.com/reciever.html?key=' + encodeURIComponent(data.connKey);
+  // Copy to clipboard
+  const tempInput = document.createElement('input');
+  tempInput.value = link;
+  document.body.appendChild(tempInput);
+  tempInput.select();
+  tempInput.setSelectionRange(0, 99999);
+  document.execCommand('copy');
+  document.body.removeChild(tempInput);
+  document.getElementById('copyLinkBtn').innerText = 'Copied!';
+  // Show floating message
+  const floatingMsg = document.getElementById('copyLinkFloatingMsg');
+  floatingMsg.style.display = 'block';
+  setTimeout(() => {
+    floatingMsg.style.display = 'none';
+    document.getElementById('copyLinkBtn').innerText = 'Copy Link';
+  }, 1500);
+};
+// ...existing code...
     });
 
     socket.on('deliver-answer', signal => {
@@ -416,6 +799,32 @@
       document.getElementById('newInstanceBtn').onclick = () => location.reload();
       // Show dropZone for file selection
       document.getElementById('dropZone').style.display = 'block';
+      // Show select buttons container
+      document.getElementById('selectButtonsContainer').style.display = 'flex';
+      // Show chat button
+      document.getElementById('chatToggleBtn').style.display = 'flex';
+    });
+
+    // Handle incoming chat messages
+    peer.on('data', data => {
+      let parsed = null;
+      try {
+        const text = new TextDecoder().decode(data);
+        parsed = JSON.parse(text);
+      } catch (err) {
+        // Not JSON, ignore
+      }
+      
+      if (parsed && parsed.type === 'chat') {
+        addChatMessage(parsed.message, false);
+      } else if (parsed && parsed.type === 'typing') {
+        // Handle typing indicator
+        if (parsed.isTyping) {
+          showTypingIndicator();
+        } else {
+          hideTypingIndicator();
+        }
+      }
     });
 
     document.getElementById('removeBtn').addEventListener('click', () => {
@@ -456,7 +865,12 @@
       }
 
       const file = files[index];
-      const meta = { name: file.name, size: file.size, type: file.type };
+      const meta = { 
+        name: file.name, 
+        size: file.size, 
+        type: file.type,
+        relativePath: file.relativePath || file.webkitRelativePath || file.name
+      };
       peer.send(JSON.stringify({ type: 'file-meta', meta }));
 
       const reader = new FileReader();
@@ -464,25 +878,25 @@
         const buffer = e.target.result;
         let offset = 0;
 
-function sendNextChunk() {
-  if (offset < buffer.byteLength) {
-    const chunk = buffer.slice(offset, offset + chunkSize);
-    // Wait if the buffer is too full
-    if (peer.bufferedAmount > 2 * 1024 * 1024) { // 2MB threshold
-      setTimeout(sendNextChunk, 20);
-      return;
-    }
-    peer.send(chunk);
-    offset += chunkSize;
-    sentBytes += chunk.byteLength || chunk.length;
-    updateProgress.sentBytes = sentBytes;
-    const percent = Math.min(100, (sentBytes / totalBytes) * 100);
-    updateProgress(percent);
-    setTimeout(sendNextChunk, 0); // Yield to event loop
-  } else {
-    sendFile(index + 1);
-  }
-}
+        function sendNextChunk() {
+          if (offset < buffer.byteLength) {
+            const chunk = buffer.slice(offset, offset + chunkSize);
+            // Wait if the buffer is too full
+            if (peer.bufferedAmount > 2 * 1024 * 1024) { // 2MB threshold
+              setTimeout(sendNextChunk, 20);
+              return;
+            }
+            peer.send(chunk);
+            offset += chunkSize;
+            sentBytes += chunk.byteLength || chunk.length;
+            updateProgress.sentBytes = sentBytes;
+            const percent = Math.min(100, (sentBytes / totalBytes) * 100);
+            updateProgress(percent);
+            setTimeout(sendNextChunk, 0); // Yield to event loop
+          } else {
+            sendFile(index + 1);
+          }
+        }
 
         sendNextChunk();
       };
@@ -499,7 +913,6 @@ function sendNextChunk() {
     document.getElementById('progressCircleContainer').style.display = "block";
     sendFile(0);
   }
-  // --- End unified progress ---
 
   function showFilePreview() {
     let previewDiv = document.getElementById('filePreview');
@@ -517,6 +930,7 @@ function sendNextChunk() {
       const row = document.createElement('div');
       row.className = 'file-row';
       const span = document.createElement('span');
+      // Show only filename, but indicate if it's from a folder with an icon
       span.textContent = `📄 ${file.name}`;
       row.appendChild(span);
       const removeBtnSingle = document.createElement('button');
@@ -537,33 +951,90 @@ function sendNextChunk() {
     }
   }
 
+  // Event Listeners
+  document.getElementById('chatToggleBtn').addEventListener('click', toggleChat);
+  document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
+  document.getElementById('chatInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      sendChatMessage();
+    }
+  });
+  
+  // Add typing indicator event listeners
+  document.getElementById('chatInput').addEventListener('input', handleTypingStart);
+  document.getElementById('chatInput').addEventListener('blur', handleTypingStop);
+
   window.onload = function() {
+    // Theme toggle button
+    const themeBtn = document.getElementById('themeToggleBtn');
+    let currentTheme = localStorage.getItem('theme') || 'dark';
+    setTheme(currentTheme);
+    themeBtn.onclick = function() {
+      currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      setTheme(currentTheme);
+    };
     startSender();
     const dropZone = document.getElementById('dropZone');
-    // Create a hidden file input for click-to-select
+    
+    // Create hidden file inputs for click-to-select
     hiddenFileInput = document.createElement('input');
     hiddenFileInput.type = 'file';
     hiddenFileInput.multiple = true;
     hiddenFileInput.style.display = 'none';
     document.body.appendChild(hiddenFileInput);
+    
     // Click on dropZone opens file dialog
     dropZone.addEventListener('click', () => {
       hiddenFileInput.value = '';
       hiddenFileInput.click();
     });
+    
+    // Select Files button
+    document.getElementById('selectFilesBtn').addEventListener('click', () => {
+      hiddenFileInput.value = '';
+      hiddenFileInput.click();
+    });
+    
+    // Select Folder button
+    document.getElementById('selectFolderBtn').addEventListener('click', () => {
+      document.getElementById('hiddenFolderInput').value = '';
+      document.getElementById('hiddenFolderInput').click();
+    });
+    
     // Handle file selection from dialog
     hiddenFileInput.addEventListener('change', (e) => {
       const newFiles = Array.from(e.target.files);
+      addFilesToSelection(newFiles);
+    });
+    
+    // Handle folder selection from dialog
+    document.getElementById('hiddenFolderInput').addEventListener('change', (e) => {
+      const newFiles = Array.from(e.target.files);
+      addFilesToSelection(newFiles, true);
+    });
+    
+    // Function to add files to selection with folder support
+    function addFilesToSelection(newFiles, isFolder = false) {
+      let addedCount = 0;
       newFiles.forEach(newFile => {
-        if (!selectedFiles.some(f => f.name === newFile.name && f.size === newFile.size) && selectedFiles.length < 25) {
+        if (!selectedFiles.some(f => f.webkitRelativePath === newFile.webkitRelativePath && f.name === newFile.name && f.size === newFile.size) && selectedFiles.length < 25) {
+          // Preserve folder structure information
+          if (isFolder && newFile.webkitRelativePath) {
+            newFile.relativePath = newFile.webkitRelativePath;
+          }
           selectedFiles.push(newFile);
+          addedCount++;
         }
       });
-      if (selectedFiles.length >= 25 && newFiles.length > 0) {
+      
+      if (selectedFiles.length >= 25 && addedCount > 0) {
         alert("You can select a maximum of 25 files.");
       }
-      showFilePreview();
-    });
+      
+      if (addedCount > 0) {
+        showFilePreview();
+      }
+    }
     // Drag events
     dropZone.addEventListener('dragover', e => {
       e.preventDefault();
@@ -576,17 +1047,48 @@ function sendNextChunk() {
     dropZone.addEventListener('drop', e => {
       e.preventDefault();
       dropZone.classList.remove('dragover');
-      const newFiles = Array.from(e.dataTransfer.files);
-      newFiles.forEach(newFile => {
-        if (!selectedFiles.some(f => f.name === newFile.name && f.size === newFile.size) && selectedFiles.length < 25) {
-          selectedFiles.push(newFile);
-        }
-      });
-      if (selectedFiles.length >= 25 && newFiles.length > 0) {
-        alert("You can select a maximum of 25 files.");
-      }
-      showFilePreview();
+      handleDroppedItems(e.dataTransfer);
     });
+    
+    // Function to handle dropped files and folders
+    async function handleDroppedItems(dataTransfer) {
+      const items = Array.from(dataTransfer.items);
+      const files = [];
+      
+      for (const item of items) {
+        if (item.kind === 'file') {
+          const entry = item.webkitGetAsEntry();
+          if (entry) {
+            await processEntry(entry, files);
+          }
+        }
+      }
+      
+      if (files.length > 0) {
+        addFilesToSelection(files, true);
+      }
+    }
+    
+    // Recursive function to process file/folder entries
+    async function processEntry(entry, files, path = '') {
+      if (entry.isFile) {
+        const file = await new Promise((resolve) => {
+          entry.file(resolve);
+        });
+        // Add relative path info for folder structure
+        file.relativePath = path + file.name;
+        files.push(file);
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const entries = await new Promise((resolve) => {
+          reader.readEntries(resolve);
+        });
+        
+        for (const childEntry of entries) {
+          await processEntry(childEntry, files, path + entry.name + '/');
+        }
+      }
+    }
 
     // --- Copy Conn Key to clipboard on click ---
     const connKeyDisplay = document.getElementById('connKeyDisplay');
