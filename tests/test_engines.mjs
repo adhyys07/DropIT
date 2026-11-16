@@ -47,7 +47,9 @@ function peerPair({ dropFirst = null, latencyMs = 0, drainBytesPerTick = 0,
     a.sent++;
     const u8 = norm(data);
     // Flip a bit in the Nth binary frame to simulate on-wire corruption.
-    if (corruptNthPayload !== null && u8.byteLength > 64) {
+    // Control messages go out as JSON strings; only damage real payload
+    // frames, or we would just be corrupting the manifest.
+    if (corruptNthPayload !== null && typeof data !== 'string' && u8.byteLength > 32) {
       payloads++;
       if (payloads === corruptNthPayload) u8[u8.byteLength - 1] ^= 0xff;
     }

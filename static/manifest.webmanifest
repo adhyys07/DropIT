@@ -1,5 +1,5 @@
 {
-  "name": "DropIT — peer-to-peer file sharing",
+  "name": "DropIT \u2014 peer-to-peer file sharing",
   "short_name": "DropIT",
   "description": "Send files directly between devices. Nothing is stored on a server.",
   "start_url": "/?source=pwa",
@@ -9,12 +9,50 @@
   "background_color": "#020617",
   "theme_color": "#020617",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
-    { "name": "Send files", "short_name": "Send", "url": "/sender.html" },
-    { "name": "Receive files", "short_name": "Receive", "url": "/reciever.html" }
-  ]
+    {
+      "name": "Send files",
+      "short_name": "Send",
+      "url": "/sender.html"
+    },
+    {
+      "name": "Receive files",
+      "short_name": "Receive",
+      "url": "/reciever.html"
+    }
+  ],
+  "share_target": {
+    "action": "/sender.html",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "*/*"
+          ]
+        }
+      ]
+    }
+  }
 }

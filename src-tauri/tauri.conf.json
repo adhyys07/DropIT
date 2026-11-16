@@ -3,24 +3,51 @@
   "productName": "DropIT",
   "version": "1.0.0",
   "identifier": "com.dropit.app",
-  "build": { "frontendDist": "../static", "devUrl": "http://localhost:5000" },
+  "build": {
+    "frontendDist": "../static",
+    "devUrl": "http://localhost:5000"
+  },
   "app": {
-    "windows": [{
-      "title": "DropIT", "width": 1100, "height": 760,
-      "minWidth": 380, "minHeight": 520, "resizable": true
-    }],
+    "windows": [
+      {
+        "title": "DropIT",
+        "width": 1100,
+        "height": 760,
+        "minWidth": 380,
+        "minHeight": 520,
+        "resizable": true
+      }
+    ],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ws: wss: https:; img-src 'self' blob: data:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis", "deb", "appimage", "dmg"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns", "icons/icon.ico"],
-    "resources": { "../server.py": "server.py", "../requirements.txt": "requirements.txt" }
+    "targets": [
+      "msi",
+      "nsis",
+      "deb",
+      "appimage",
+      "dmg"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../server.py": "server.py",
+      "../requirements.txt": "requirements.txt"
+    }
   },
   "plugins": {
-    "dialog": {}, "fs": { "requireLiteralLeadingDot": false },
-    "notification": {}, "clipboard-manager": {}
+    "dialog": {},
+    "fs": {
+      "requireLiteralLeadingDot": false
+    },
+    "notification": {},
+    "clipboard-manager": {}
   }
 }

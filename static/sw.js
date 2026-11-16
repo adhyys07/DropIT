@@ -41,6 +41,33 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+
+  // PWA share target: the OS POSTs files here. A static page cannot read a
+  // POST body, so stash the files in a cache and redirect to a GET.
+  if (req.method === 'POST' && new URL(req.url).pathname === '/sender.html') {
+    event.respondWith(Response.redirect('/sender.html?shared=1', 303));
+    event.waitUntil((async () => {
+      try {
+        const data = await req.formData();
+        const files = data.getAll('files').filter((f) => f && f.name);
+        const text = data.get('text') || data.get('title') || '';
+        const cache = await caches.open('dropit-share');
+        await cache.put('/__shared__', new Response(
+          JSON.stringify({ text, count: files.length }),
+          { headers: { 'Content-Type': 'application/json' } }));
+        for (let i = 0; i < files.length; i++) {
+          await cache.put(`/__shared__/${i}`, new Response(files[i], {
+            headers: {
+              'Content-Type': files[i].type || 'application/octet-stream',
+              'X-Name': encodeURIComponent(files[i].name),
+            },
+          }));
+        }
+      } catch { /* nothing usable was shared */ }
+    })());
+    return;
+  }
+
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);

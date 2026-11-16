@@ -93,6 +93,15 @@
             </select>
             <span class="note">The key stops working after this.</span>
           </div>
+          <div class="field">
+            <label for="optUses">Key uses</label>
+            <select id="optUses">
+              <option value="0" selected>Unlimited (until it expires)</option>
+              <option value="1">Once — burn after first use</option>
+              <option value="3">Up to 3 devices</option>
+            </select>
+            <span class="note">How many devices may ever join with this key.</span>
+          </div>
           <label class="check"><input id="optApprove" type="checkbox" checked>
             Ask me before letting a device connect</label>
           <button class="btn" id="applyOpts" type="button">Apply &amp; Regenerate Key</button>
@@ -114,9 +123,27 @@
         <button class="btn" id="copyBtn" type="button" style="width:100%" disabled>
           <span id="copyLbl">Copy Link</span>
         </button>
+        <p class="share" id="shareRow" hidden>
+          <a class="btn btn-sm" id="mailBtn" href="#">Email link</a>
+          <a class="btn btn-sm" id="smsBtn" href="#">Text link</a>
+        </p>
         <p class="waiting" id="waitRow"><span class="pulse" aria-hidden="true"></span>
           <span id="waitText">Waiting for a receiver to connect…</span></p>
         <p class="hint" id="netNote" hidden></p>
+
+        <div class="safety" id="safetyRow" hidden>
+          <span class="slabel">Safety words</span>
+          <strong class="swords" id="safetyWords" translate="no"></strong>
+          <button class="btn btn-ghost btn-sm" type="button" id="safetyHelp"
+                  aria-label="What are safety words?">?</button>
+        </div>
+
+        <div class="qrow" id="qRow" hidden>
+          <span class="dot" aria-hidden="true"></span>
+          <span id="qPath">—</span>
+          <span class="grow"></span>
+          <span>RTT <strong class="tnum" id="qRtt">—</strong></span>
+        </div>
       </div>
 
       <div class="peers" id="peers"></div>
@@ -279,6 +306,15 @@
   </div>
 </dialog>
 
+<dialog id="safetyDlg" aria-labelledby="sfT">
+  <h2 id="sfT">Why these words?</h2>
+  <p>Both devices work out these words from the encryption keys they agreed on.
+     If the other person sees the same words in the same order, your transfer is
+     end-to-end encrypted and nobody is relaying it in the middle.</p>
+  <p>If the words differ, <strong>stop and do not send anything.</strong></p>
+  <div class="dlgacts"><button class="btn" type="button" id="sfOk" autofocus>Got it</button></div>
+</dialog>
+
 <dialog id="busyDlg" aria-labelledby="bdT">
   <div class="dlg-c">
     <div class="spinner" aria-hidden="true"></div>
@@ -306,7 +342,9 @@ import {
 } from '/js/extras.js';
 import { attachSenderReconnect, supervise } from '/js/reconnect.js';
 import * as history from '/js/history.js';
-import { peerOptions, iceConfig, attachIceWatch, explainIce } from '/js/ice.js';
+import { peerOptions, iceConfig, attachIceWatch, explainIce,
+         connectionQuality } from '/js/ice.js';
+import { safetyCode } from '/js/safety.js';
 
 // WebRTC, clipboard, notifications and the camera are all disabled outside a
 // secure context — fail loudly instead of looking mysteriously broken.
@@ -333,17 +371,30 @@ function showErr(msg) { $('errMsg').textContent = msg; if (!$('errDlg').open) $(
 $('errOk').onclick = () => $('errDlg').close();
 
 /* ------------------------------------------------ theme (persisted) */
-function applyTheme(dark) {
+const THEMES = ['system', 'light', 'dark'];
+const THEME_LABEL = { system: 'Theme: follows your system', light: 'Theme: light',
+                      dark: 'Theme: dark' };
+function applyTheme(mode) {
+  const dark = mode === 'dark'
+    || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   $('themeColor').setAttribute('content', dark ? '#020617' : '#F8FAFC');
-  $('themeBtn').setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
-  localStorage.setItem('dropit.theme', dark ? 'dark' : 'light');
+  $('themeBtn').setAttribute('aria-label',
+    `${THEME_LABEL[mode]}. Activate to change.`);
+  $('themeBtn').dataset.mode = mode;
+  localStorage.setItem('dropit.theme', mode);
 }
 (function () {
   const saved = localStorage.getItem('dropit.theme');
-  applyTheme(saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+  applyTheme(THEMES.includes(saved) ? saved : 'system');
 })();
-$('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme !== 'dark');
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if ((localStorage.getItem('dropit.theme') || 'system') === 'system') applyTheme('system');
+});
+$('themeBtn').onclick = () => {
+  const cur = localStorage.getItem('dropit.theme') || 'system';
+  applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+};
 
 /* ------------------------------------------------ device name (12) */
 $('myName').textContent = deviceName();
@@ -409,6 +460,7 @@ function createRoom() {
     maxReceivers: Math.min(8, Math.max(1, parseInt($('optMax').value, 10) || 1)),
     ttlSeconds: parseInt($('optTtl').value, 10) || 1800,
     requireApproval: $('optApprove').checked,
+    maxUses: parseInt($('optUses').value, 10) || 0,
     deviceName: state.deviceName,
   });
 }
@@ -427,6 +479,16 @@ socket.on('room-created', (room) => {
   $('qr').setAttribute('aria-label', `QR code for session key ${room.code}`);
   new QRious({ element: $('qr'), value: link, size: 154, padding: 0, level: 'M' });
   $('copyBtn').disabled = false;
+  const subject = encodeURIComponent('A file for you');
+  const body = encodeURIComponent(`Open this link to receive the files:
+
+${link}
+
+`
+    + `Or enter the key: ${room.code}`);
+  $('mailBtn').href = `mailto:?subject=${subject}&body=${body}`;
+  $('smsBtn').href = `sms:?&body=${body}`;
+  $('shareRow').hidden = false;
   setWait(room.requireApproval
     ? 'Waiting for a receiver — you will be asked to approve.'
     : 'Waiting for a receiver to connect…');
@@ -451,6 +513,10 @@ setInterval(() => {
 }, 1000);
 
 socket.on('room-touched', (d) => { expiresAt = d.expiresAt; });
+socket.on('room-exhausted', ({ uses }) => {
+  setWait(`This key has been used ${uses} time${uses === 1 ? '' : 's'} and is now spent — `
+        + 'generate a new one to send again.');
+});
 socket.on('room-closed', (d) => {
   expiresAt = 0;
   setWait(`Session closed (${d.reason}). Reload to start a new one.`);
@@ -532,6 +598,7 @@ function connectTo(receiverId, name) {
       setWait(`${entry.name} connected — ready to send.`, true);
       renderPeers(); syncCta();
       ann(`${entry.name} connected.`);
+      showSafety(peer);
       // Pick the transfer back up from the chunk the receiver last confirmed.
       if (running && entry.resumeWanted) {
         entry.resumeWanted = false;
@@ -953,6 +1020,56 @@ addEventListener('beforeunload', (e) => { if (running) { e.preventDefault(); e.r
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+/* Safety words: derived from both DTLS fingerprints. Matching words on both
+   devices prove no one is relaying the transfer in the middle. */
+async function showSafety(peer) {
+  try {
+    const code = await safetyCode(peer);
+    if (!code) return;
+    $('safetyWords').textContent = code;
+    $('safetyRow').hidden = false;
+  } catch { /* fingerprints unavailable */ }
+}
+$('safetyHelp').onclick = () => $('safetyDlg').showModal();
+$('sfOk').onclick = () => $('safetyDlg').close();
+
+/* Connection quality: direct vs relayed, and round-trip time. */
+setInterval(async () => {
+  const live = livePeers()[0];
+  if (!live || !live.peer) { $('qRow').hidden = true; return; }
+  const q = await connectionQuality(live.peer);
+  if (!q) return;
+  $('qPath').textContent = q.path;
+  $('qRtt').textContent = q.rttMs != null ? `${q.rttMs} ms` : '—';
+  $('qRow').classList.toggle('relayed', q.relayed);
+  $('qRow').hidden = false;
+}, 2000);
+
+/* Files shared into DropIT from the OS share sheet (PWA share target). */
+(async function pickUpShared() {
+  if (!new URLSearchParams(location.search).has('shared')) return;
+  try {
+    const cache = await caches.open('dropit-share');
+    const meta = await cache.match('/__shared__');
+    if (!meta) return;
+    const { count, text } = await meta.json();
+    const picked = [];
+    for (let i = 0; i < count; i++) {
+      const res = await cache.match(`/__shared__/${i}`);
+      if (!res) continue;
+      const name = decodeURIComponent(res.headers.get('X-Name') || `shared-${i}`);
+      const f = new File([await res.blob()], name,
+                         { type: res.headers.get('Content-Type') || '' });
+      try { f.relativePath = name; } catch {}
+      picked.push(f);
+    }
+    if (picked.length) addFiles(picked);
+    if (text) { $('clipText').value = text; $('sendClipBtn').disabled = false; }
+    await caches.delete('dropit-share');
+    window.history.replaceState(null, '', '/sender.html');
+  } catch { /* nothing shared */ }
+})();
 
 iceConfig().then((c) => {
   if (!c.hasTurn) {

@@ -82,6 +82,20 @@
 
       <div class="peers" id="peers"></div>
 
+      <div class="safety" id="safetyRow" hidden>
+        <span class="slabel">Safety words</span>
+        <strong class="swords" id="safetyWords" translate="no"></strong>
+        <button class="btn btn-ghost btn-sm" type="button" id="safetyHelp"
+                aria-label="What are safety words?">?</button>
+      </div>
+
+      <div class="qrow" id="qRow" hidden>
+        <span class="dot" aria-hidden="true"></span>
+        <span id="qPath">—</span>
+        <span class="grow"></span>
+        <span>RTT <strong class="tnum" id="qRtt">—</strong></span>
+      </div>
+
       <div class="hero">
         <span class="heropct tnum" id="heroPct">0%</span>
         <p class="herosub" id="heroSub">Connected — waiting for the sender</p>
@@ -226,6 +240,15 @@
   </div>
 </dialog>
 
+<dialog id="safetyDlg" aria-labelledby="sfT">
+  <h2 id="sfT">Why these words?</h2>
+  <p>Both devices work out these words from the encryption keys they agreed on.
+     If the sender sees the same words in the same order, your transfer is
+     end-to-end encrypted and nobody is relaying it in the middle.</p>
+  <p>If the words differ, <strong>stop and do not accept the files.</strong></p>
+  <div class="dlgacts"><button class="btn" type="button" id="sfOk" autofocus>Got it</button></div>
+</dialog>
+
 <dialog id="resumeDlg" aria-labelledby="rsT">
   <h2 id="rsT">Resume Previous Download?</h2>
   <p>An unfinished transfer is still stored on this device:
@@ -267,7 +290,9 @@ import { attachReceiverReconnect, supervise, rebindRecvEngine }
   from '/js/reconnect.js';
 import * as history from '/js/history.js';
 import * as idb from '/js/idb-store.js';
-import { peerOptions, iceConfig, attachIceWatch, explainIce } from '/js/ice.js';
+import { peerOptions, iceConfig, attachIceWatch, explainIce,
+         connectionQuality } from '/js/ice.js';
+import { safetyCode } from '/js/safety.js';
 
 if (!window.isSecureContext && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)) {
   document.body.innerHTML =
@@ -292,17 +317,28 @@ const KEY_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
 const normKey = (s) => String(s).toUpperCase().replace(/[^ABCDEFGHJKMNPQRSTUVWXYZ23456789]/g, '');
 
 /* ------------------------------------------------ theme */
-function applyTheme(dark) {
+const THEMES = ['system', 'light', 'dark'];
+const THEME_LABEL = { system: 'Theme: follows your system', light: 'Theme: light',
+                      dark: 'Theme: dark' };
+function applyTheme(mode) {
+  const dark = mode === 'dark'
+    || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   $('themeColor').setAttribute('content', dark ? '#020617' : '#F8FAFC');
-  $('themeBtn').setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
-  localStorage.setItem('dropit.theme', dark ? 'dark' : 'light');
+  $('themeBtn').setAttribute('aria-label', `${THEME_LABEL[mode]}. Activate to change.`);
+  localStorage.setItem('dropit.theme', mode);
 }
 (function () {
   const saved = localStorage.getItem('dropit.theme');
-  applyTheme(saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+  applyTheme(THEMES.includes(saved) ? saved : 'system');
 })();
-$('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme !== 'dark');
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if ((localStorage.getItem('dropit.theme') || 'system') === 'system') applyTheme('system');
+});
+$('themeBtn').onclick = () => {
+  const cur = localStorage.getItem('dropit.theme') || 'system';
+  applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
+};
 
 /* ------------------------------------------------ device name (12) */
 $('myName').textContent = deviceName();
@@ -443,6 +479,10 @@ socket.on('approval-result', ({ approved }) => {           // Feature 13
 socket.on('error', (e) => {
   try { $('busyDlg').close(); } catch {}
   const code = e && e.code;
+  if (code === 'used-up') {
+    fail('This key has already been used up. Ask the sender for a new one.');
+    return;
+  }
   if (code === 'bad-password') {
     state.password = '';
     $('pwNote').textContent = 'That password was wrong.';
@@ -506,6 +546,7 @@ async function buildPeer() {
     go(2); renderPeers(); syncCta();
     setNetNote(null);
     ann(`Connected to ${senderName}.`);
+    showSafety(peer);
   });
 
   detachIce = attachIceWatch(peer, {
@@ -599,6 +640,10 @@ async function buildPeer() {
 
   // One session id per room, so a reload can find its own partial chunks.
   engine.sessionId = state.roomCode;
+  // Rebuild `have` from storage before the first announceResumeState().
+  engine.restoreFromStorage().then((n) => {
+    if (n) ann(`Resuming ${n} partially received file${n === 1 ? '' : 's'}.`);
+  });
 
   wirePeerData();
   peer.on('close', onPeerGone);
@@ -851,6 +896,27 @@ addEventListener('beforeunload', (e) => {
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+async function showSafety(peer) {
+  try {
+    const code = await safetyCode(peer);
+    if (!code) return;
+    $('safetyWords').textContent = code;
+    $('safetyRow').hidden = false;
+  } catch { /* fingerprints unavailable */ }
+}
+$('safetyHelp').onclick = () => $('safetyDlg').showModal();
+$('sfOk').onclick = () => $('safetyDlg').close();
+
+setInterval(async () => {
+  if (!peer || !connected) { $('qRow').hidden = true; return; }
+  const q = await connectionQuality(peer);
+  if (!q) return;
+  $('qPath').textContent = q.path;
+  $('qRtt').textContent = q.rttMs != null ? `${q.rttMs} ms` : '—';
+  $('qRow').classList.toggle('relayed', q.relayed);
+  $('qRow').hidden = false;
+}, 2000);
 
 iceConfig().then((c) => {
   if (!c.hasTurn) {

@@ -115,6 +115,8 @@ def public_room(room: dict) -> dict:
         "hasPassword": room["pw"] is not None,
         "senderName": room["sender_name"],
         "maxReceivers": room["max_receivers"],
+        "maxUses": room["max_uses"],
+        "uses": room["uses"],
         "requireApproval": room["require_approval"],
         "receivers": [
             {"receiverId": rid, "name": rec["name"], "approved": rec["approved"]}
@@ -234,6 +236,11 @@ def on_create_room(data):
     except (TypeError, ValueError):
         max_recv = 1
 
+    try:
+        max_uses = max(0, int(data.get("maxUses") or 0))     # 0 = unlimited
+    except (TypeError, ValueError):
+        max_uses = 0
+
     password = (data.get("password") or "").strip()
     salt, pw = (None, None)
     if password:
@@ -255,6 +262,8 @@ def on_create_room(data):
             "expires": now + ttl,
             "sender_gone_at": None,
             "max_receivers": max_recv,
+            "max_uses": max_uses,
+            "uses": 0,
             "require_approval": bool(data.get("requireApproval", True)),
             "receivers": {},
         }
@@ -319,10 +328,16 @@ def on_join_room(data):
             note_failure(ip)
             return emit("error", {"code": "bad-password", "message": "Wrong password"})
 
+    if room["max_uses"] and room["uses"] >= room["max_uses"]:
+        return emit("error", {"code": "used-up",
+                              "message": "This key has already been used."})
+
     with _lock:
+        rejoin = False
         for old_rid, rec in list(room["receivers"].items()):
             if rec["sid"] == request.sid:
                 room["receivers"].pop(old_rid, None)
+                rejoin = True
 
         if len(room["receivers"]) >= room["max_receivers"]:
             return emit("error", {"code": "room-full", "message": "This room is full"})
@@ -333,7 +348,16 @@ def on_join_room(data):
             "name": (data.get("deviceName") or "Receiver")[:40],
             "approved": not room["require_approval"],
         }
+        # A reconnect from the same socket is not a new use, or a
+        # "burn after one use" key would die on the first dropped connection.
+        if not rejoin:
+            room["uses"] += 1
+        exhausted = bool(room["max_uses"]) and room["uses"] >= room["max_uses"]
     join_room(code)
+
+    if exhausted:
+        socketio.emit("room-exhausted",
+                      {"code": code, "uses": room["uses"]}, room=room["sender_sid"])
 
     emit("room-joined", {
         "code": code,

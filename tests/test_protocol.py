@@ -23,7 +23,8 @@ def mk(name):
     c.events = []
     for ev in ["room-created", "room-joined", "receiver-joined", "need-password",
                "error", "signal", "approval-result", "room-touched",
-               "room-resumed", "receiver-left", "sender-dropped", "room-closed"]:
+               "room-resumed", "receiver-left", "sender-dropped", "room-closed",
+               "room-exhausted"]:
         def handler(data=None, _ev=ev, _c=c):
             _c.events.append((_ev, data))
         c.on(ev, handler)
@@ -194,7 +195,55 @@ err = wait_for(s4c, "error")
 check("resume with bad token refused", err and err["code"] == "resume-failed", err)
 s4c.disconnect(); s4b.disconnect()
 
-print("\n=== 12. join rate limit (12 per 60s per IP) ===")
+print("\n=== 12. burn after N uses ===")
+s5 = mk("sender5")
+s5.emit("create-room", {"deviceName": "BurnSender", "requireApproval": False,
+                        "maxReceivers": 4, "maxUses": 2})
+broom = wait_for(s5, "room-created")
+check("maxUses echoed", broom and broom.get("maxUses") == 2, broom and broom.get("maxUses"))
+bcode = broom["code"]
+
+b1 = mk("burn1")
+b1.emit("join-room", {"code": bcode, "deviceName": "B1"})
+check("1st use allowed", wait_for(b1, "room-joined") is not None)
+
+s5.events.clear()
+b2 = mk("burn2")
+b2.emit("join-room", {"code": bcode, "deviceName": "B2"})
+check("2nd use allowed", wait_for(b2, "room-joined") is not None)
+check("sender told the key is spent", wait_for(s5, "room-exhausted") is not None)
+
+b3 = mk("burn3")
+b3.emit("join-room", {"code": bcode, "deviceName": "B3"})
+err = wait_for(b3, "error")
+check("3rd use refused", err and err["code"] == "used-up", err)
+for c in (b1, b2, b3, s5):
+    try: c.disconnect()
+    except Exception: pass
+
+print("\n=== 13. unlimited uses is the default ===")
+s6 = mk("sender6")
+s6.emit("create-room", {"deviceName": "FreeSender", "requireApproval": False,
+                        "maxReceivers": 3})
+froom = wait_for(s6, "room-created")
+check("maxUses defaults to 0", froom and froom.get("maxUses") == 0, froom and froom.get("maxUses"))
+fcode = froom["code"]
+ok = True
+clients = []
+for i in range(3):
+    c = mk(f"free{i}")
+    clients.append(c)
+    c.emit("join-room", {"code": fcode, "deviceName": f"F{i}"})
+    if wait_for(c, "room-joined") is None:
+        ok = False
+check("three joins all succeed with no use cap", ok)
+for c in clients + [s6]:
+    try: c.disconnect()
+    except Exception: pass
+
+# Runs last on purpose: it deliberately trips the rate limiter, which
+# would otherwise reject every join in the tests that followed it.
+print("\n=== 14. join rate limit (12 per 60s per IP) ===")
 rl = mk("rl")
 hits = 0
 for i in range(16):
@@ -205,6 +254,8 @@ for i in range(16):
         hits += 1
 check("rate limiting kicks in", hits > 0, f"{hits} rate-limited of 16")
 rl.disconnect()
+
+
 
 for c in (s, r1):
     try: c.disconnect()
