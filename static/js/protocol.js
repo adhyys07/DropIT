@@ -2,7 +2,9 @@
    Control messages: JSON strings.  Payload: binary frames with an 8-byte header.
    Header: u32 fileId (big-endian), u32 chunkIndex (big-endian).  */
 
-export const HEADER_BYTES = 8;
+/* Frame header: u32 fileId, u32 chunkIndex, u8 flags (big-endian). */
+export const HEADER_BYTES = 9;
+export const FLAG_GZIP = 1;
 export const DEFAULT_CHUNK = 64 * 1024;  
 export const WINDOW_CHUNKS = 32;          
 export const HIGH_WATER   = 4 * 1024 * 1024;
@@ -23,14 +25,17 @@ export const MSG = {
   CHAT:         'chat',
   TYPING:       'typing',
   DONE:         'done',
+  FILE_HASH:    'file-hash',     
+  HASH_RESULT:  'hash-result', 
 };
 
-export function frame(fileId, chunkIndex, payload) {
+export function frame(fileId, chunkIndex, payload, flags = 0) {
   const body = payload instanceof ArrayBuffer ? new Uint8Array(payload) : payload;
   const out = new Uint8Array(HEADER_BYTES + body.byteLength);
   const dv = new DataView(out.buffer);
   dv.setUint32(0, fileId);
   dv.setUint32(4, chunkIndex);
+  dv.setUint8(8, flags);
   out.set(body, HEADER_BYTES);
   return out;
 }
@@ -41,6 +46,7 @@ export function unframe(data) {
   return {
     fileId: dv.getUint32(0),
     chunkIndex: dv.getUint32(4),
+    flags: dv.getUint8(8),
     payload: u8.subarray(HEADER_BYTES),
   };
 }

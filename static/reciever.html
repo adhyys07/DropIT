@@ -53,6 +53,7 @@
                autocapitalize="characters" placeholder="ABCD2345" maxlength="8"
                aria-describedby="keyHint" translate="no">
         <p class="hint" id="keyHint">8 letters and digits — no I, L, O, 0 or 1</p>
+        <p class="hint" id="netNote" hidden></p>
 
         <div class="or"><span>or</span></div>
         <button class="btn" id="scanBtn" type="button" style="width:100%">
@@ -225,6 +226,16 @@
   </div>
 </dialog>
 
+<dialog id="resumeDlg" aria-labelledby="rsT">
+  <h2 id="rsT">Resume Previous Download?</h2>
+  <p>An unfinished transfer is still stored on this device:
+     <strong id="resumeWhat"></strong>. Reconnecting fetches only the missing part.</p>
+  <div class="dlgacts">
+    <button class="btn btn-danger" type="button" id="resNo">Discard</button>
+    <button class="btn btn-cta" type="button" id="resYes" style="width:auto" autofocus>Resume</button>
+  </div>
+</dialog>
+
 <dialog id="busyDlg" aria-labelledby="bdT">
   <div class="dlg-c">
     <div class="spinner" aria-hidden="true"></div>
@@ -252,8 +263,20 @@ import {
   renderClipboardCard, enableNotifications, notifyTransferStart,
   notifyTransferDone, notifyCancelled,
 } from '/js/extras.js';
-import { attachReceiverReconnect } from '/js/reconnect.js';
+import { attachReceiverReconnect, supervise, rebindRecvEngine }
+  from '/js/reconnect.js';
 import * as history from '/js/history.js';
+import * as idb from '/js/idb-store.js';
+import { peerOptions, iceConfig, attachIceWatch, explainIce } from '/js/ice.js';
+
+if (!window.isSecureContext && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)) {
+  document.body.innerHTML =
+    '<div class="app"><main><h1>HTTPS required</h1>' +
+    '<p class="lede">DropIT needs a secure connection. WebRTC, the clipboard, ' +
+    'notifications and the QR camera are all disabled by browsers on plain HTTP.</p>' +
+    '</main></div>';
+  throw new Error('insecure context');
+}
 
 const $ = (id) => document.getElementById(id);
 const ann = (m) => { $('ann').textContent = m; };
@@ -400,18 +423,20 @@ socket.on('room-joined', async ({ receiverId, senderName: sn, needsApproval }) =
   senderName = sn || 'Sender';
   renderPeers();
   await enableNotifications();
+  startSupervisor();
   if (needsApproval) {
     $('busyMsg').textContent = `Waiting for ${senderName} to allow this device…`;
     if (!$('busyDlg').open) $('busyDlg').showModal();
     ann('Waiting for the sender to approve this device.');
   } else {
-    buildPeer();
+    await buildPeer();
   }
 });
 
 socket.on('approval-result', ({ approved }) => {           // Feature 13
   if (!approved) { return fail('The sender denied this device.'); }
   $('busyMsg').textContent = 'Approved — opening the direct link.';
+  startSupervisor();
   buildPeer();
 });
 
@@ -437,15 +462,37 @@ function fail(msg) {
 $('errOk').onclick = () => { $('errDlg').close(); if (step === 1) $('keyIn').focus(); };
 
 function disconnect() {
+  sup?.stop();
+  detachIce?.();
   socket.emit('leave-room', { code: state.roomCode });
   if (peer) { try { peer.destroy(); } catch {} peer = null; }
   connected = false; stopSampler(); renderPeers(); syncCta();
 }
 
 /* ------------------------------------------------ peer + engine */
-function buildPeer() {
+let sup = null;
+let detachIce = null;
+
+function startSupervisor() {
+  sup?.stop();
+  sup = supervise({
+    build: buildPeer,
+    shouldRetry: () => !!state.roomCode && !!state.receiverId,
+    hooks: {
+      onRetry: ({ attempt, max }) => {
+        $('heroSub').textContent = `Connection lost — retrying (${attempt}/${max})…`;
+      },
+      onRecovered: () => { $('heroSub').textContent = 'Reconnected — resuming'; },
+      onGaveUp: () => fail('Lost the connection and could not get it back.'),
+    },
+  });
+  sup.start();
+}
+
+async function buildPeer() {
+  detachIce?.();
   if (peer) { try { peer.destroy(); } catch {} }
-  peer = new SimplePeer({ initiator: false, trickle: true });
+  peer = new SimplePeer(await peerOptions({ initiator: false }));
 
   peer.on('signal', (signal) =>
     socket.emit('signal', { code: state.roomCode, receiverId: state.receiverId, signal }));
@@ -453,12 +500,29 @@ function buildPeer() {
   peer.on('connect', () => {
     try { $('busyDlg').close(); } catch {}
     connected = true;
+    sup?.noteConnected();
     sendHello(peer, { role: 'receiver' });
     $('heroSub').textContent = `Connected to ${senderName} — waiting for files`;
     go(2); renderPeers(); syncCta();
-    if (engine) engine.announceResumeState();              // Feature 8
+    setNetNote(null);
     ann(`Connected to ${senderName}.`);
   });
+
+  detachIce = attachIceWatch(peer, {
+    onLikelyBlocked: (info) => setNetNote(explainIce(info)),
+    onFailed: () => setNetNote('Connection failed. Try the same Wi-Fi network, '
+                             + 'or ask the sender to configure a TURN relay.'),
+    onOk: () => setNetNote(null),
+  });
+
+  if (engine) {
+    // Reuse the engine so RESUME_STATE tells the sender what we already hold.
+    rebindRecvEngine(peer, engine);
+    wirePeerData();
+    peer.on('close', onPeerGone);
+    peer.on('error', onPeerGone);
+    return peer;
+  }
 
   engine = new RecvEngine(peer, {
     onManifest: (m) => {
@@ -490,8 +554,13 @@ function buildPeer() {
     onFile: (rec) => {                                     // Features 10, 15
       received.push(rec);
       renderReceived();
-      ann(`${rec.name} received.`);
+      ann(`${rec.name} received${rec.integrity === 'verified' ? ' and verified' : ''}.`);
       if (!rec.complete) $('heroSub').textContent = `${rec.name} is incomplete`;
+    },
+
+    onIntegrityFailure: (rec) => {                         // integrity check
+      fail(`${rec.name} arrived corrupted — the checksum does not match. `
+         + 'Ask the sender to send it again.');
     },
 
     onState: ({ phase, files }) => {
@@ -528,6 +597,16 @@ function buildPeer() {
     onError: (err) => ann(`Receive error: ${err.message}`),
   });
 
+  // One session id per room, so a reload can find its own partial chunks.
+  engine.sessionId = state.roomCode;
+
+  wirePeerData();
+  peer.on('close', onPeerGone);
+  peer.on('error', onPeerGone);
+  return peer;
+}
+
+function wirePeerData() {
   peer.on('data', (d) => {
     let msg = null;
     try { msg = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(d)); } catch {}
@@ -538,13 +617,21 @@ function buildPeer() {
     }
     engine.onData(d);
   });
+}
 
-  peer.on('error', (err) => { try { $('busyDlg').close(); } catch {}
-                              fail('Connection error: ' + err.message); });
-  peer.on('close', () => {
-    connected = false; stopSampler(); renderPeers(); syncCta();
-    $('heroSub').textContent = 'Sender disconnected';
-  });
+function onPeerGone() {
+  connected = false;
+  stopSampler();
+  renderPeers(); syncCta();
+  $('heroSub').textContent = 'Connection lost';
+  sup?.noteLost();
+}
+
+function setNetNote(text) {
+  const el = $('netNote');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
 }
 
 socket.on('signal', ({ signal }) => { if (peer) { try { peer.signal(signal); } catch {} } });
@@ -638,7 +725,10 @@ function renderReceived() {
         ? '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
         : '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg>'}</span>
       <span class="m"><span class="n" title="${esc(label)}">${esc(label)}</span>
-        <span class="s tnum">${fmtBytes(f.size)}${f.savedToDisk ? ' · saved to disk' : ''}${ok ? '' : ' · incomplete'}</span></span>
+        <span class="s tnum">${fmtBytes(f.size)}${f.savedToDisk ? ' · saved to disk' : ''}${ok ? '' : ' · incomplete'}${
+          f.integrity === 'verified' ? ' · <span class="ok">verified</span>'
+        : f.integrity === 'MISMATCH' ? ' · <span class="bad">CHECKSUM FAILED</span>'
+        : f.integrity === 'partial'  ? ' · unverified (resumed)' : ''}</span></span>
       <span class="acts">
         ${previewable ? `<button class="x go" type="button" data-pv="${i}" aria-label="Preview ${esc(f.name)}">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>
@@ -761,6 +851,39 @@ addEventListener('beforeunload', (e) => {
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+iceConfig().then((c) => {
+  if (!c.hasTurn) {
+    console.warn('[DropIT]', c.note);
+    setNetNote('Direct connection only — no TURN relay is configured, '
+             + 'so mobile and office networks may fail to connect.');
+  }
+});
+
+/* Offer to resume a download left half-finished by a reload (IndexedDB). */
+(async function offerResume() {
+  if (!globalThis.indexedDB) return;
+  try {
+    await idb.prune();
+    const sessions = await idb.listSessions();
+    if (!sessions.length) return;
+    const s = sessions[0];
+    const code = String(s.key).split('/')[0];
+    $('resumeWhat').textContent = `${s.name} (${fmtBytes(s.size)})`;
+    $('resumeDlg').showModal();
+    $('resYes').onclick = () => {
+      $('resumeDlg').close();
+      $('keyIn').value = normKey(code).slice(0, 8);
+      syncCta();
+      if (KEY_RE.test($('keyIn').value)) connect();
+    };
+    $('resNo').onclick = async () => {
+      $('resumeDlg').close();
+      await idb.dropSession(code);
+      ann('Discarded the unfinished download.');
+    };
+  } catch { /* storage unavailable — nothing to resume */ }
+})();
 
 drawSpark(); renderReceived(); renderHistory(); go(1);
 

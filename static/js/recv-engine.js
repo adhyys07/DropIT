@@ -1,38 +1,68 @@
-import { MSG, unframe, readControl, send, fmtBytes } from './protocol.js';
+import { MSG, unframe, readControl, send, fmtBytes, FLAG_GZIP } from './protocol.js';
+import { gunzip } from './compress.js';
+import * as idb from './idb-store.js';
+import { RollingDigest } from './integrity.js';
+
 
 async function makeWriter(meta) {
-  // Tier 1: File System Access API — streams to disk, unlimited size.
   if (window.showSaveFilePicker && meta.size > 256 * 1024 * 1024) {
     try {
       const handle = await window.showSaveFilePicker({ suggestedName: meta.name });
       const ws = await handle.createWritable();
       return {
         kind: 'fsa',
-        write: (u8) => ws.write(u8),
+        write: (u8, _i) => ws.write(u8),          // sequential sink
         close: async () => { await ws.close(); return { handle }; },
         abort: async () => { try { await ws.abort(); } catch {} },
       };
     } catch { }
   }
 
-  // Tier 2: StreamSaver (service-worker download stream).
   if (window.streamSaver && meta.size > 512 * 1024 * 1024) {
     const fileStream = window.streamSaver.createWriteStream(meta.name, { size: meta.size });
     const w = fileStream.getWriter();
     return {
       kind: 'streamsaver',
-      write: (u8) => w.write(u8),
+      write: (u8, _i) => w.write(u8),             // sequential sink
       close: async () => { await w.close(); return {}; },
       abort: async () => { try { await w.abort(); } catch {} },
     };
   }
 
+  // Tier 3: IndexedDB — survives a page reload, so a resume can continue.
+  if (meta.sessionId && meta.size > 32 * 1024 * 1024 && globalThis.indexedDB) {
+    try {
+      await idb.putMeta(meta.sessionId, meta.fileId, {
+        name: meta.name, size: meta.size, mime: meta.mime,
+        relativePath: meta.relativePath, chunkSize: meta.chunkSize,
+        chunkCount: meta.chunkCount, at: Date.now(),
+      });
+      return {
+        kind: 'idb',
+        // Key by the absolute chunk index — a local counter desynchronises
+        // from the real indices as soon as a resume skips chunks.
+        write: async (u8, absIndex) => {
+          await idb.putChunk(meta.sessionId, meta.fileId, absIndex, u8.slice());
+        },
+        close: async () => {
+          const blob = await idb.assemble(
+            meta.sessionId, meta.fileId, meta.chunkCount, meta.mime);
+          await idb.dropFile(meta.sessionId, meta.fileId);
+          return { blob, url: URL.createObjectURL(blob) };
+        },
+        abort: async () => { try { await idb.dropFile(meta.sessionId, meta.fileId); } catch {} },
+      };
+    } catch { /* IDB unavailable (private mode, quota) -> fall through */ }
+  }
+
+  // Tier 4: in memory. Fine for small files.
   const parts = [];
   return {
     kind: 'blob',
-    write: (u8) => { parts.push(u8.slice()); },
+    write: (u8, absIndex) => { parts[absIndex] = u8.slice(); },
     close: async () => {
-      const blob = new Blob(parts, { type: meta.mime || 'application/octet-stream' });
+      const blob = new Blob(parts.filter(Boolean),
+                            { type: meta.mime || 'application/octet-stream' });
       parts.length = 0;
       return { blob, url: URL.createObjectURL(blob) };
     },
@@ -51,8 +81,10 @@ export class RecvEngine {
     this.paused = false;
     this.startedAt = 0;
     this.totalReceived = 0;
+    this.wireBytes = 0;
     this._ackTimer = null;
     this._queue = Promise.resolve();   // serialises onData; writes are async
+    this.sessionId = null;             // set by the page; enables IDB resume
   }
 
   pause()  { this.paused = true;  send(this.peer, { type: MSG.PAUSE }); }
@@ -62,6 +94,26 @@ export class RecvEngine {
 
   approve(accepted) { send(this.peer, { type: MSG.APPROVE, accepted }); }   // Feature 13
 
+  /**
+   * Rebuild `have` from chunks persisted by a previous page load, so
+   * announceResumeState() asks only for the gap. Without this a reload
+   * silently restarts every file from zero.
+   */
+  async restoreFromStorage() {
+    if (!this.sessionId || !globalThis.indexedDB) return 0;
+    let restored = 0;
+    try {
+      for (const s of await idb.listSessions()) {
+        const [sid, fid] = String(s.key).split('/');
+        if (sid !== this.sessionId) continue;
+        const next = await idb.firstGap(sid, Number(fid), s.chunkCount || 0);
+        this.have.set(Number(fid), next);
+        restored++;
+      }
+    } catch { /* storage unavailable */ }
+    return restored;
+  }
+
   /** Feature 8: after a reconnect, tell the sender what we already hold. */
   announceResumeState() {
     for (const [fileId, nextIndex] of this.have) {
@@ -69,13 +121,6 @@ export class RecvEngine {
     }
   }
 
-  /**
-   * Entry point for peer.on('data').
-   *
-   * Chunk handling awaits writer.write(), so two overlapping invocations could
-   * interleave and corrupt nextIndex. Everything is therefore chained onto a
-   * single promise so frames are processed strictly in arrival order.
-   */
   onData(data) {
     const msg = readControl(data);
     const job = msg
@@ -105,9 +150,16 @@ export class RecvEngine {
 
       case MSG.FILE_START: {
         if (this.active) await this.active.writer.abort();
-        const writer = await makeWriter({ name: msg.name, size: msg.size, mime: msg.mime });
+        const writer = await makeWriter({
+          name: msg.name, size: msg.size, mime: msg.mime, fileId: msg.fileId,
+          relativePath: msg.relativePath, chunkSize: msg.chunkSize,
+          chunkCount: msg.chunkCount, startIndex: msg.startIndex || 0,
+          sessionId: this.sessionId,
+        });
+        const digest = new RollingDigest();
+        if (msg.startIndex) digest.markGap();
         this.active = {
-          meta: msg, writer,
+          meta: msg, writer, digest,
           received: (msg.startIndex || 0) * (msg.chunkSize || 0),
           nextIndex: msg.startIndex || 0,
           pending: new Map(),
@@ -117,7 +169,7 @@ export class RecvEngine {
       }
 
       case MSG.FILE_END:
-        await this._finishFile();
+        await this._finishFile(msg.sha256 || null);
         break;
 
       case MSG.PAUSE:  this.paused = true;  this.hooks.onState?.({ phase: 'paused' }); break;
@@ -138,18 +190,31 @@ export class RecvEngine {
     }
   }
 
-  async _onChunk({ fileId, chunkIndex, payload }) {
+  async _onChunk({ fileId, chunkIndex, flags, payload }) {
     const a = this.active;
-    if (!a || a.meta.fileId !== fileId) return;   
+    if (!a || a.meta.fileId !== fileId) return;   // stray chunk from a cancelled file
+
+    // Inflate before writing or hashing: the sender hashed the plaintext.
+    if (flags & FLAG_GZIP) {
+      try {
+        payload = await gunzip(payload);
+      } catch (err) {
+        this.hooks.onError?.(new Error(`Could not decompress chunk ${chunkIndex}: ${err.message}`));
+        return;
+      }
+    }
+    this.wireBytes += payload.byteLength;
 
     if (chunkIndex === a.nextIndex) {
-      await a.writer.write(payload);
+      await a.writer.write(payload, a.nextIndex);
+      await a.digest.update(payload);
       a.received += payload.byteLength;
       a.nextIndex++;
       while (a.pending.has(a.nextIndex)) {
         const p = a.pending.get(a.nextIndex);
         a.pending.delete(a.nextIndex);
-        await a.writer.write(p);
+        await a.writer.write(p, a.nextIndex);
+        await a.digest.update(p);
         a.received += p.byteLength;
         a.nextIndex++;
       }
@@ -179,11 +244,17 @@ export class RecvEngine {
     this._pendingAck = null;
   }
 
-  async _finishFile() {
+  async _finishFile(expected = null) {
     const a = this.active;
     if (!a) return;
     this._flushAck();
     const out = await a.writer.close();
+    const actual = await a.digest.hex();
+
+    let integrity = 'skipped';
+    if (expected && actual) integrity = (expected === actual) ? 'verified' : 'MISMATCH';
+    else if (expected || actual) integrity = 'partial';
+
     const rec = {
       fileId: a.meta.fileId,
       name: a.meta.name,
@@ -195,10 +266,15 @@ export class RecvEngine {
       blob: out.blob || null,
       savedToDisk: a.writer.kind !== 'blob',
       complete: a.received >= a.meta.size,
+      sha256: actual,
+      integrity,
     };
     this.files.push(rec);
     this.active = null;
+
+    try { send(this.peer, { type: MSG.HASH_RESULT, fileId: rec.fileId, integrity }); } catch {}
     this.hooks.onFile?.(rec);
+    if (integrity === 'MISMATCH') this.hooks.onIntegrityFailure?.(rec);
   }
 
   async _abort(fileId = null) {

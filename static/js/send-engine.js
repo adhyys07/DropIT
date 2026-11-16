@@ -1,6 +1,9 @@
 import {
   MSG, frame, send, maxChunkFor, WINDOW_CHUNKS, HIGH_WATER, DEFAULT_CHUNK,
+  FLAG_GZIP,
 } from './protocol.js';
+import { RollingDigest } from './integrity.js';
+import { gzip, worthCompressing } from './compress.js';
 
 const tick = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -19,6 +22,9 @@ export class SendEngine {
     this.total = 0;
     this.startedAt = 0;
     this.resumeFrom = new Map();      
+    this.interrupted = false;
+    this.compress = true;     // page may switch this off
+    this.wireBytes = 0;       // actual bytes on the wire (post-gzip)
   }
 
   pause() {                                            
@@ -47,6 +53,13 @@ export class SendEngine {
     send(this.peer, { type: MSG.CANCEL, all: true });
     this.resume();
     this.hooks.onState?.('cancelled');
+  }
+
+  /** Point the engine at a replacement datachannel after a reconnect. */
+  rebind(peer) {
+    this.peer = peer;
+    this.unacked.clear();        // the old send window is meaningless now
+    this.interrupted = false;
   }
 
   handleControl(msg) {
@@ -88,14 +101,17 @@ export class SendEngine {
 
   async sendAll(files, { requireApproval = true } = {}) {
     this.chunk = maxChunkFor(this.peer);                     
-    this.files = files.map((f, i) => ({
+    this.files = files.map((f, i) => {
+      try { f._fileId = i + 1; } catch { /* frozen File */ }
+      return {
       fileId: i + 1,
       file: f,
       name: f.name,
       size: f.size,
       type: f.type || 'application/octet-stream',
       relativePath: f.relativePath || f.webkitRelativePath || f.name,
-    }));
+      };
+    });
     this.total = this.files.reduce((a, f) => a + f.size, 0);
     this.sent = 0;
     this.startedAt = Date.now();
@@ -147,6 +163,15 @@ export class SendEngine {
     });
     if (start) this.sent += Math.min(size, start * this.chunk);
 
+    // Feature: integrity. Hash each chunk as it goes out; the root is sent
+    // with FILE_END. A resume skips chunks, so the root is then unusable.
+    const digest = new RollingDigest();
+    if (start > 0) digest.markGap();
+
+    // Compression is decided per file: already-compressed formats would only
+    // grow. Text and code folders typically shrink by 60-80%.
+    const tryCompress = this.compress && worthCompressing(entry.type, size);
+
     for (let index = start; index < chunkCount; index++) {
       if (this.cancelledAll || this.cancelled.has(fileId)) return;
       await this._pauseGate();
@@ -163,15 +188,32 @@ export class SendEngine {
         return;
       }
 
+      // Hash the plaintext first: the receiver verifies decompressed bytes.
+      await digest.update(new Uint8Array(buf));
+
+      let body = new Uint8Array(buf);
+      let flags = 0;
+      if (tryCompress) {
+        try {
+          const z = await gzip(body);
+          // Only pay the framing cost when it actually saves something.
+          if (z.byteLength < body.byteLength * 0.92) { body = z; flags = FLAG_GZIP; }
+        } catch { /* compression unavailable - send as-is */ }
+      }
+
       try {
-        this.peer.send(frame(fileId, index, buf));
+        this.peer.send(frame(fileId, index, body, flags));
       } catch (err) {
+        // Channel went away mid-file: remember the spot, let the
+        // supervisor rebuild, and surrender this loop.
         this.resumeFrom.set(fileId, index);
+        this.interrupted = true;
         this.hooks.onError?.(err);
         return;
       }
 
-      this.unacked.set(`${fileId}:${index}`, buf.byteLength);
+      this.unacked.set(`${fileId}:${index}`, body.byteLength);
+      this.wireBytes += body.byteLength;
       this.sent += buf.byteLength;
       this.hooks.onProgress?.(this._stats());
     }
@@ -179,8 +221,9 @@ export class SendEngine {
     const deadline = Date.now() + 30000;
     while (this.unacked.size && Date.now() < deadline && !this.cancelledAll) await tick(25);
 
-    send(this.peer, { type: MSG.FILE_END, fileId });
-    this.hooks.onFileDone?.(entry);
+    const sha256 = await digest.hex();
+    send(this.peer, { type: MSG.FILE_END, fileId, sha256, bytes: size });
+    this.hooks.onFileDone?.({ ...entry, sha256 });
   }
 
   _stats() {

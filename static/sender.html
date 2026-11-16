@@ -116,6 +116,7 @@
         </button>
         <p class="waiting" id="waitRow"><span class="pulse" aria-hidden="true"></span>
           <span id="waitText">Waiting for a receiver to connect…</span></p>
+        <p class="hint" id="netNote" hidden></p>
       </div>
 
       <div class="peers" id="peers"></div>
@@ -303,8 +304,20 @@ import {
   copyToClipboard, renderClipboardCard, enableNotifications,
   notifyTransferDone, notifyCancelled,
 } from '/js/extras.js';
-import { attachSenderReconnect } from '/js/reconnect.js';
+import { attachSenderReconnect, supervise } from '/js/reconnect.js';
 import * as history from '/js/history.js';
+import { peerOptions, iceConfig, attachIceWatch, explainIce } from '/js/ice.js';
+
+// WebRTC, clipboard, notifications and the camera are all disabled outside a
+// secure context — fail loudly instead of looking mysteriously broken.
+if (!window.isSecureContext && !['localhost', '127.0.0.1', '::1'].includes(location.hostname)) {
+  document.body.innerHTML =
+    '<div class="app"><main><h1>HTTPS required</h1>' +
+    '<p class="lede">DropIT needs a secure connection. WebRTC, the clipboard, ' +
+    'notifications and the QR camera are all disabled by browsers on plain HTTP.</p>' +
+    '</main></div>';
+  throw new Error('insecure context');
+}
 
 const $ = (id) => document.getElementById(id);
 const ann = (m) => { $('ann').textContent = m; };
@@ -421,8 +434,8 @@ socket.on('room-created', (room) => {
 });
 
 $('applyOpts').onclick = () => {
-  for (const p of peers.values()) { try { p.peer.destroy(); } catch {} }
-  peers.clear(); renderPeers();
+  for (const rid of [...peers.keys()]) dropPeer(rid);
+  renderPeers();
   socket.emit('leave-room', { code: state.roomCode });
   state.roomCode = null; state.resumeToken = null;
   createRoom();
@@ -452,7 +465,7 @@ function setWait(text, live = false) {
 const approvalQueue = [];
 let approving = false;
 socket.on('receiver-joined', ({ receiverId, name, approved }) => {
-  if (approved) return connectTo(receiverId, name);
+  if (approved) { connectTo(receiverId, name); return; }
   approvalQueue.push({ receiverId, name });
   pumpApproval();
 });
@@ -475,55 +488,122 @@ function pumpApproval() {
 }
 socket.on('receiver-left', ({ receiverId }) => {
   const p = peers.get(receiverId);
-  if (p) { try { p.peer.destroy(); } catch {} peers.delete(receiverId); }
-  renderPeers(); syncCta();
+  if (p) dropPeer(receiverId); else { renderPeers(); syncCta(); }
 });
 
 /* ------------------------------------------------ one peer per receiver (4) */
 function connectTo(receiverId, name) {
-  const peer = new SimplePeer({ initiator: true, trickle: true });
-  const entry = { peer, engine: null, name, connected: false, stats: null };
+  const entry = {
+    peer: null, engine: null, name, connected: false, stats: null,
+    sup: null, resumeWanted: false, net: null, detachIce: null,
+  };
   peers.set(receiverId, entry);
   renderPeers();
 
-  peer.on('signal', (signal) =>
-    socket.emit('signal', { code: state.roomCode, receiverId, signal }));
-
-  peer.on('connect', () => {
-    entry.connected = true;
-    sendHello(peer, { role: 'sender' });
-    setWait(`${entry.name} connected — ready to send.`, true);
-    renderPeers(); syncCta();
-    ann(`${entry.name} connected.`);
-  });
-
-  entry.engine = new SendEngine(peer, {
+  const makeEngine = () => new SendEngine(entry.peer, {
     onProgress: (s) => { entry.stats = s; paintProgress(); },
     onState: (phase) => {
       if (phase === 'declined') ann(`${entry.name} declined the transfer.`);
       renderPeers();
     },
-    onAllDone: ({ cancelled, bytes, ms }) => {
+    onAllDone: ({ cancelled, bytes }) => {
       if (cancelled) notifyCancelled(entry.name);
       else notifyTransferDone(files.length, bytes, entry.name);
     },
-    onError: (err) => { ann(`Transfer error: ${err.message}`); },
+    onFileDone: (f) => { if (f.sha256) console.debug('[sha256]', f.name, f.sha256); },
+    onError: (err) => { ann(`${entry.name}: ${err.message}`); },
   });
 
-  peer.on('data', (data) => {
-    let msg = null;
-    try { msg = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data)); } catch {}
-    if (!msg || !msg.type) return;
-    if (msg.type === MSG.HELLO) { entry.name = msg.name || entry.name; renderPeers(); }
-    else if (msg.type === MSG.CHAT) addMsg(msg.message, false, entry.name);
-    else if (msg.type === MSG.TYPING) showTyping(!!msg.isTyping, entry.name);
-    else if (msg.type === MSG.CLIPBOARD) renderClipboardCard(msg, $('clipFeed'));
-    else entry.engine.handleControl(msg);
-  });
+  // Rebuilt by the supervisor whenever the datachannel drops (feature 8).
+  const build = async () => {
+    entry.detachIce?.();
+    const peer = new SimplePeer(await peerOptions({ initiator: true }));
+    entry.peer = peer;
+    if (entry.engine) entry.engine.rebind(peer); else entry.engine = makeEngine();
 
-  peer.on('error', (err) => { entry.connected = false; renderPeers(); syncCta();
-                              ann(`${entry.name}: ${err.message}`); });
-  peer.on('close', () => { entry.connected = false; renderPeers(); syncCta(); });
+    peer.on('signal', (signal) =>
+      socket.emit('signal', { code: state.roomCode, receiverId, signal }));
+
+    peer.on('connect', () => {
+      entry.connected = true;
+      entry.net = 'connected';
+      entry.sup.noteConnected();
+      sendHello(peer, { role: 'sender' });
+      setWait(`${entry.name} connected — ready to send.`, true);
+      renderPeers(); syncCta();
+      ann(`${entry.name} connected.`);
+      // Pick the transfer back up from the chunk the receiver last confirmed.
+      if (running && entry.resumeWanted) {
+        entry.resumeWanted = false;
+        entry.engine.sendAll(files, { requireApproval: false });
+      }
+    });
+
+    peer.on('data', (data) => {
+      let msg = null;
+      try { msg = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data)); } catch {}
+      if (!msg || !msg.type) return;
+      if (msg.type === MSG.HELLO) { entry.name = msg.name || entry.name; renderPeers(); }
+      else if (msg.type === MSG.CHAT) addMsg(msg.message, false, entry.name);
+      else if (msg.type === MSG.TYPING) showTyping(!!msg.isTyping, entry.name);
+      else if (msg.type === MSG.CLIPBOARD) renderClipboardCard(msg, $('clipFeed'));
+      else if (msg.type === MSG.HASH_RESULT) {
+        if (msg.integrity === 'MISMATCH') {
+          showErr(`${entry.name} reports a checksum mismatch — the file arrived corrupted.`);
+        }
+      } else entry.engine.handleControl(msg);
+    });
+
+    peer.on('error', () => { entry.connected = false; renderPeers(); syncCta(); });
+    peer.on('close', () => {
+      entry.connected = false;
+      renderPeers(); syncCta();
+      if (running) entry.resumeWanted = true;
+      entry.sup.noteLost();
+    });
+
+    entry.detachIce = attachIceWatch(peer, {
+      onState: (s) => { entry.net = s; renderPeers(); },
+      onLikelyBlocked: (info) => setNetNote(explainIce(info)),
+      onFailed: () => setNetNote(
+        'Connection failed. Try the same Wi-Fi network, or configure a TURN relay.'),
+      onOk: () => setNetNote(null),
+    });
+    return peer;
+  };
+
+  entry.sup = supervise({
+    build,
+    shouldRetry: () => peers.has(receiverId),
+    hooks: {
+      onRetry: ({ attempt, waitMs, max }) =>
+        ann(`Reconnecting to ${entry.name} (${attempt}/${max}) in ${Math.round(waitMs / 1000)}s…`),
+      onRecovered: () => ann(`${entry.name} reconnected — resuming.`),
+      onGaveUp: () => {
+        ann(`Could not reconnect to ${entry.name}.`);
+        dropPeer(receiverId);
+      },
+    },
+  });
+  entry.sup.start();
+  build().catch((err) => ann(`Could not connect: ${err.message}`));
+}
+
+function dropPeer(receiverId) {
+  const p = peers.get(receiverId);
+  if (!p) return;
+  p.sup?.stop();
+  p.detachIce?.();
+  try { p.peer?.destroy(); } catch {}
+  peers.delete(receiverId);
+  renderPeers(); syncCta();
+}
+
+function setNetNote(text) {
+  const el = $('netNote');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
 }
 
 socket.on('signal', ({ receiverId, signal }) => {
@@ -565,7 +645,9 @@ function renderFiles() {
       <span class="ft ${inFolder ? 'dir' : ''}" aria-hidden="true">${IC[inFolder ? 'folder' : 'file']}</span>
       <span class="m"><span class="n" title="${esc(label)}">${esc(label)}</span>
         <span class="s tnum">${fmtBytes(f.size)}</span></span>
-      <button class="x" type="button" data-rm="${i}" aria-label="Remove ${esc(f.name)} from queue">
+      <button class="x" type="button"
+              ${running ? `data-skip="${f._fileId || i + 1}"` : `data-rm="${i}"`}
+              aria-label="${running ? 'Stop sending' : 'Remove'} ${esc(f.name)}">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button></div>`;
   }).join('') : '<p class="empty">Nothing selected yet.</p>';
@@ -574,10 +656,18 @@ function renderFiles() {
   $('sumCount').textContent = `across ${files.length} item${files.length === 1 ? '' : 's'}`;
   $('kSentSub').textContent = `of ${fmtBytes(totalBytes())}`;
   $('clearBtn').disabled = !files.length || running;
+  $('rows').dataset.mode = running ? 'sending' : 'queue';
   syncCta();
 }
 
 $('rows').addEventListener('click', (e) => {
+  const skip = e.target.closest('[data-skip]');
+  if (skip) {
+    const fileId = +skip.dataset.skip;
+    for (const p of peers.values()) p.engine?.cancelFile(fileId);
+    ann('Skipping that file.');
+    return;
+  }
   const rm = e.target.closest('[data-rm]');
   if (!rm || running) return;
   const gone = files.splice(+rm.dataset.rm, 1)[0];
@@ -863,6 +953,14 @@ addEventListener('beforeunload', (e) => { if (running) { e.preventDefault(); e.r
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+iceConfig().then((c) => {
+  if (!c.hasTurn) {
+    console.warn('[DropIT]', c.note);
+    setNetNote('Direct connection only — no TURN relay configured, '
+             + 'so mobile and office networks may fail to connect.');
+  }
+});
 
 drawSpark(); renderFiles(); resetProgress(); renderHistory(); go(1);
 </script>
