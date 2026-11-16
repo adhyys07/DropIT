@@ -1,1109 +1,870 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" data-theme="light">
 <head>
-  <script src="https://cdn.jsdelivr.net/npm/qrious/dist/qrious.min.js"></script>
-  <title>P2P File Share</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;700&display=swap');
-    :root {
-      --bg-gradient: radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%);
-      --container-bg: rgba(20, 30, 40, 0.95);
-      --container-border: #00ffae44;
-      --container-shadow: #00ffae22;
-      --container-inset: #00ffae11;
-      --container-text-shadow: #00ffae88;
-      --main-color: #00ffae;
-      --main-color-dark: #181f23;
-      --button-bg: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
-      --button-hover-bg: #181f23;
-      --button-hover-color: #00ffae;
-      --button-hover-border: #00ffae;
-      --remove-btn-bg: #181f23;
-      --remove-btn-color: #00ffae;
-      --remove-btn-hover-bg: #00ffae;
-      --remove-btn-hover-color: #181f23;
-      --progress-bg: rgba(0,255,174,0.03);
-      --progress-bar-bg: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
-      --progress-bar-shadow: #00ffae99;
-      --progress-container-bg: rgba(0,255,174,0.08);
-      --progress-container-shadow: #00ffae33;
-      --file-row-bg: inherit;
-      --file-row-color: inherit;
-      --selection-bg: #00ffae44;
-    }
-    body {
-      font-family: 'Fira Mono', 'Consolas', 'Menlo', 'Monaco', monospace;
-      background: var(--bg-gradient);
-      height: 100vh;
-      margin: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      color: var(--main-color);
-      letter-spacing: 0.5px;
-      user-select: none;
-      transition: background 0.3s, color 0.3s;
-    }
-    .container {
-      background: var(--container-bg);
-      border: 2px solid var(--container-border);
-      border-radius: 20px;
-      padding: 32px 36px 32px 36px;
-      color: var(--main-color);
-      max-width: 600px;
-      width: 90%;
-      box-shadow: 0 8px 32px var(--container-shadow), 0 0 0 2px var(--container-inset) inset;
-      text-shadow: 0 0 2px var(--container-text-shadow);
-      transition: background 0.3s, color 0.3s;
-    }
-    h2 {
-      font-family: 'Fira Mono', 'Consolas', monospace;
-      font-size: 2em;
-      background: var(--main-color);
-      color: var(--main-color-dark);
-      display: inline-block;
-      padding: 4px 16px;
-      border-radius: 8px;
-      margin-bottom: 18px;
-      letter-spacing: 1.5px;
-      box-shadow: 0 2px 12px #00ffae33;
-      text-shadow: none;
-    }
-    button {
-      background: var(--button-bg);
-      color: var(--main-color-dark);
-      font-family: 'Fira Mono', 'Consolas', monospace;
-      font-weight: bold;
-      cursor: pointer;
-      width: 100%;
-      margin-top: 10px;
-      padding: 10px;
-      font-size: 1rem;
-      border-radius: 10px;
-      border: none;
-      outline: none;
-      box-shadow: 0 2px 8px var(--container-shadow);
-      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-      letter-spacing: 1px;
-    }
-    button:hover {
-      background: var(--button-hover-bg);
-      color: var(--button-hover-color);
-      box-shadow: 0 0 16px #00ffae99;
-      border: 1.5px solid var(--button-hover-border);
-    }
-    #themeToggleBtn {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1000;
-      width: auto !important;
-      padding: 8px 18px;
-      font-size: 1.1em;
-      border-radius: 12px;
-      border: none;
-      box-shadow: 0 2px 12px #00ffae33;
-      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
-      color: #181f23;
-      font-family: 'Fira Mono', 'Consolas', monospace;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
-    }
-    #chatToggleBtn {
-      position: fixed;
-      bottom: 30px;
-      right: 30px;
-      z-index: 1000;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background: linear-gradient(90deg, #00ffae 0%, #00bfae 100%);
-      color: #181f23;
-      font-size: 1.5em;
-      border: none;
-      box-shadow: 0 4px 16px #00ffae44;
-      cursor: pointer;
-      transition: background 0.2s, color 0.2s;
-      display: none;
-      align-items: center;
-      justify-content: center;
-    }
-    #chatDialog {
-      position: fixed;
-      bottom: 100px;
-      right: 30px;
-      z-index: 999;
-      background: var(--container-bg);
-      border: 2px solid #00ffae44;
-      border-radius: 16px;
-      padding: 20px;
-      width: 350px;
-      max-width: 90vw;
-      box-shadow: 0 8px 32px #00ffae33;
-      display: none;
-      flex-direction: column;
-      gap: 10px;
-    }
-    #chatMessages {
-      height: 200px;
-      overflow-y: auto;
-      background: rgba(0,0,0,0.1);
-      border-radius: 8px;
-      padding: 10px;
-      font-size: 0.9em;
-      margin-bottom: 10px;
-      border: 1px solid #00ffae33;
-    }
-    .chat-message {
-      margin-bottom: 8px;
-      padding: 4px 8px;
-      border-radius: 6px;
-      word-wrap: break-word;
-    }
-    .sender-message {
-      background: rgba(0,255,174,0.1);
-      text-align: right;
-      color: #00ffae;
-    }
-    .receiver-message {
-      background: rgba(0,191,174,0.1);
-      text-align: left;
-      color: #00bfae;
-    }
-    .typing-indicator {
-      background: rgba(0,191,174,0.05);
-      text-align: left;
-      color: #00bfae;
-      font-style: italic;
-      opacity: 0.8;
-      animation: pulse 1.5s infinite;
-    }
-    @keyframes pulse {
-      0% { opacity: 0.5; }
-      50% { opacity: 1; }
-      100% { opacity: 0.5; }
-    }
-    .typing-dots {
-      display: inline-block;
-    }
-    .typing-dots::after {
-      content: '';
-      animation: typingDots 1.5s infinite;
-    }
-    @keyframes typingDots {
-      0% { content: ''; }
-      25% { content: '.'; }
-      50% { content: '..'; }
-      75% { content: '...'; }
-      100% { content: ''; }
-    }
-    #chatInputContainer {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    #chatInput {
-      flex: 1;
-      padding: 8px 12px;
-      border-radius: 8px;
-      border: 2px solid #00ffae;
-      background: rgba(20,30,40,0.9);
-      color: #00ffae;
-      font-family: inherit;
-      font-size: 0.9em;
-      outline: none;
-      min-width: 0;
-    }
-    #chatSendBtn {
-      padding: 8px 16px;
-      width: auto;
-      margin: 0;
-      font-size: 0.9em;
-    }
-    .remove-single-btn {
-      width: auto;
-      padding: 2px 8px;
-      font-size: 1rem;
-      background: var(--remove-btn-bg);
-      color: var(--remove-btn-color);
-      border: 1px solid var(--main-color);
-      border-radius: 5px;
-      cursor: pointer;
-      margin-left: 10px;
-      font-family: inherit;
-      transition: background 0.2s, color 0.2s;
-    }
-    .remove-single-btn:hover {
-      background: var(--remove-btn-hover-bg);
-      color: var(--remove-btn-hover-color);
-    }
-    .file-row {
-      display: flex;
-      align-items: center;
-      margin: 2px 0;
-      font-size: 1.08em;
-      letter-spacing: 0.5px;
-      background: var(--file-row-bg);
-      color: var(--file-row-color);
-    }
-    #progressCircleContainer {
-      margin: 20px auto 20px auto;
-      background: var(--progress-bg);
-      border-radius: 50%;
-      width: 160px;
-      height: 160px;
-      position: relative;
-      display: none;
-      box-shadow: 0 0 24px var(--progress-container-shadow);
-    }
-    #circularPercent {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%,-50%);
-      color: var(--main-color);
-      font-weight: bold;
-      font-size: 1.1em;
-      white-space: nowrap;
-      text-shadow: 0 0 8px #00ffae99;
-      letter-spacing: 1px;
-    }
-    #dropZone {
-      display:none;
-      border: 2px dashed var(--main-color);
-      border-radius: 12px;
-      padding: 30px;
-      text-align: center;
-      color: var(--main-color);
-      margin-bottom: 10px;
-      background: rgba(0,255,174,0.07);
-      cursor:pointer;
-      font-size: 1.1em;
-      font-family: inherit;
-      letter-spacing: 1px;
-      transition: background 0.2s, border 0.2s;
-      box-shadow: 0 0 12px var(--progress-container-shadow);
-    }
-    #dropZone:hover, #dropZone.dragover {
-      background: rgba(0,255,174,0.13);
-      border: 2px solid var(--main-color);
-      color: var(--main-color-dark);
-    }
-    #selectFilesBtn, #selectFolderBtn {
-      background: var(--button-bg);
-      color: var(--main-color-dark);
-      border: none;
-      border-radius: 8px;
-      padding: 10px 16px;
-      font-size: 0.95em;
-      font-weight: bold;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-family: inherit;
-      letter-spacing: 0.5px;
-    }
-    #selectFilesBtn:hover, #selectFolderBtn:hover {
-      background: var(--button-hover-bg);
-      color: var(--button-hover-color);
-      border: 1.5px solid var(--button-hover-border);
-      box-shadow: 0 0 12px var(--progress-bar-shadow);
-    }
-    #processingDialog {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(10,20,30,0.92);
-      z-index: 9999;
-      align-items: center;
-      justify-content: center;
-    }
-    #processingDialog > div {
-      background: var(--main-color-dark);
-      color: var(--main-color);
-      padding: 30px 40px;
-      border-radius: 16px;
-      font-size: 1.3em;
-      font-weight: bold;
-      box-shadow: 0 8px 32px var(--progress-container-shadow);
-      font-family: inherit;
-      letter-spacing: 1.5px;
-      text-align: center;
-      border: 2px solid var(--main-color);
-      text-shadow: 0 0 8px #00ffae99;
-    }
-    #connKeyDisplay, #connKeyDisplay + p {
-      color: var(--main-color);
-      font-family: inherit;
-      font-size: 1.1em;
-      letter-spacing: 1px;
-      margin-bottom: 0;
-      margin-top: 18px;
-      text-shadow: 0 0 8px #00ffae55;
-      cursor: pointer;
-      user-select: text;
-      transition: background 0.2s;
-    }
-    #connKeyDisplay:hover {
-      background: #00ffae22;
-    }
-    #copyMsg {
-      display: none;
-      position: absolute;
-      left: 50%;
-      top: -28px;
-      transform: translateX(-50%);
-      background: var(--main-color-dark);
-      color: var(--main-color);
-      font-size: 1em;
-      padding: 4px 16px;
-      border-radius: 8px;
-      box-shadow: 0 2px 12px var(--progress-container-shadow);
-      z-index: 10;
-      text-shadow: 0 0 8px #00ffae99;
-      pointer-events: none;
-    }
-    #qrCanvas {
-      background: var(--main-color-dark);
-      border-radius: 10px;
-      box-shadow: 0 0 16px var(--progress-container-shadow);
-      margin-bottom: 10px;
-    }
-    #progressContainer {
-      display:none;
-      margin-top:15px;
-      background: var(--progress-container-bg);
-      border-radius: 10px;
-      overflow: hidden;
-      height: 20px;
-      box-shadow: 0 0 8px var(--progress-container-shadow);
-    }
-    #progressBar {
-      height: 100%;
-      width: 0%;
-      background: var(--progress-bar-bg);
-      transition: width 0.3s;
-      box-shadow: 0 0 8px var(--progress-bar-shadow);
-    }
-    #transferStats {
-      margin-top:10px;
-      font-size:1em;
-      color:var(--main-color);
-      text-align:center;
-      display:none;
-    }
-    ::selection {
-      background: var(--selection-bg);
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F8FAFC" id="themeColor">
+<title>Send files — DropIT</title>
+<meta name="description" content="Send files directly between devices. Nothing is stored on a server.">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="64x64" href="/icons/favicon-64.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/dropit.css">
 </head>
 <body>
-<button id="themeToggleBtn">🌙 Dark Mode</button>
+<div class="app">
 
-<!-- Chat Button and Dialog -->
-<button id="chatToggleBtn">💬</button>
-<div id="chatDialog">
-  <div style="font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-    <span>Chat with Receiver</span>
-    <div style="display: flex; gap: 8px;">
-      <button id="clearChatBtn" style="background: none; border: none; color: #00ffae; font-size: 1.1em; cursor: pointer; width: auto; margin: 0; padding: 0;" title="Clear chat">🧹</button>
-      <button onclick="toggleChat()" style="background: none; border: none; color: #00ffae; font-size: 1.2em; cursor: pointer; width: auto; margin: 0; padding: 0;">✖</button>
-    </div>
+  <header>
+    <a class="brand" href="/">
+      <span class="mk" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
+      <span translate="no">DropIT</span>
+    </a>
+    <span class="grow"></span>
+    <span class="me" title="This device's name">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/></svg>
+      <b id="myName">…</b>
+    </span>
+    <button class="ibtn" id="renameBtn" type="button" aria-label="Rename this device">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+    </button>
+    <button class="ibtn" id="themeBtn" type="button" aria-label="Switch to dark theme">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/></svg>
+    </button>
+  </header>
+
+  <div class="steps">
+    <span class="of" id="stepOf">Step 1 of 3</span>
+    <span class="track" aria-hidden="true"><i class="on"></i><i></i><i></i></span>
   </div>
-  <div id="chatMessages"></div>
-  <div id="chatInputContainer">
-    <input id="chatInput" type="text" placeholder="Type a message..." autocomplete="off" />
-    <button id="chatSendBtn">Send</button>
+
+  <main>
+    <!-- ======================= STEP 1 · CHOOSE ======================= -->
+    <section class="pane on" id="p1" aria-labelledby="h1">
+      <h1 id="h1">What are you sending?</h1>
+      <p class="lede">Pick files or a whole folder. Nothing leaves this device until a receiver connects.</p>
+
+      <button class="drop" id="drop" type="button">
+        <span class="ic" aria-hidden="true"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.9V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.1"/><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/></svg></span>
+        <b>Drop Files Here</b>
+        <span>or press Enter to browse</span>
+      </button>
+      <div class="pair">
+        <button class="btn" type="button" id="pickFiles">Select Files</button>
+        <button class="btn" type="button" id="pickFolder">Select Folder</button>
+      </div>
+      <input id="fileInput" type="file" multiple hidden>
+      <input id="folderInput" type="file" webkitdirectory hidden>
+
+      <div class="rows" id="rows"></div>
+      <p class="sum">
+        <b class="tnum" id="sumSize">0 B</b> <span id="sumCount">across 0 items</span>
+        <button class="btn btn-ghost btn-danger btn-sm" id="clearBtn" type="button"
+                style="margin-left:auto" disabled>Remove All</button>
+      </p>
+
+      <!-- Features 2, 3, 4, 13 -->
+      <details class="opts" id="opts">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+          Session Options
+        </summary>
+        <div class="body">
+          <div class="field">
+            <label for="optPw">Password (optional)</label>
+            <input id="optPw" type="password" autocomplete="new-password" placeholder="Leave blank for no password">
+            <span class="note">Receivers must type this before they can connect.</span>
+          </div>
+          <div class="field">
+            <label for="optMax">Maximum receivers</label>
+            <input id="optMax" type="number" min="1" max="8" value="1" inputmode="numeric">
+            <span class="note">Send to several devices at once (up to 8).</span>
+          </div>
+          <div class="field">
+            <label for="optTtl">Key lifetime</label>
+            <select id="optTtl">
+              <option value="600">10 minutes</option>
+              <option value="1800" selected>30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="21600">6 hours</option>
+            </select>
+            <span class="note">The key stops working after this.</span>
+          </div>
+          <label class="check"><input id="optApprove" type="checkbox" checked>
+            Ask me before letting a device connect</label>
+          <button class="btn" id="applyOpts" type="button">Apply &amp; Regenerate Key</button>
+        </div>
+      </details>
+    </section>
+
+    <!-- ======================= STEP 2 · SHARE ======================== -->
+    <section class="pane" id="p2" aria-labelledby="h2b">
+      <h1 id="h2b">Share this key</h1>
+      <p class="lede">The receiver enters the key or scans the code. It works once, for this session only.</p>
+
+      <div class="keycard">
+        <button class="keybig tnum" id="keyText" type="button" translate="no"
+                aria-label="Session key, activate to copy">………</button>
+        <p class="keysub">Expires in <span class="tnum" id="ttl">—</span></p>
+        <div class="qrb"><canvas id="qr" role="img"
+             aria-label="QR code containing the session link"></canvas></div>
+        <button class="btn" id="copyBtn" type="button" style="width:100%" disabled>
+          <span id="copyLbl">Copy Link</span>
+        </button>
+        <p class="waiting" id="waitRow"><span class="pulse" aria-hidden="true"></span>
+          <span id="waitText">Waiting for a receiver to connect…</span></p>
+      </div>
+
+      <div class="peers" id="peers"></div>
+    </section>
+
+    <!-- ======================= STEP 3 · TRANSFER ===================== -->
+    <section class="pane" id="p3" aria-labelledby="h3b">
+      <h1 id="h3b" class="sr">Transfer progress</h1>
+      <div class="hero">
+        <span class="heropct tnum" id="heroPct">0%</span>
+        <p class="herosub" id="heroSub">Waiting to start</p>
+      </div>
+      <div class="meterrow">
+        <div class="meter" role="progressbar" aria-valuenow="0" aria-valuemin="0"
+             aria-valuemax="100" aria-label="Overall transfer progress" id="meter">
+          <i id="meterFill" style="width:0%"></i>
+        </div>
+      </div>
+
+      <dl class="tiles">
+        <div class="tile">
+          <dt>Throughput</dt>
+          <dd class="tnum" id="kThru">0 B/s</dd>
+          <span class="delta" id="kDelta">awaiting start</span>
+          <div class="sparkwrap">
+            <svg id="spark" viewBox="0 0 200 42" preserveAspectRatio="none" role="img"
+                 aria-labelledby="sparkTitle" tabindex="0">
+              <title id="sparkTitle">Throughput, last 24 samples</title>
+              <path class="area" id="sparkArea" d=""/>
+              <path class="line" id="sparkLine" d=""/>
+              <line class="base" x1="0" y1="41" x2="200" y2="41"/>
+              <line class="cross" id="sparkCross" x1="0" y1="0" x2="0" y2="42"/>
+              <circle class="pt" id="sparkPt" cx="0" cy="0"/>
+            </svg>
+            <span class="tip" id="sparkTip"></span>
+          </div>
+        </div>
+        <div class="tile"><dt>Time Left</dt><dd class="tnum" id="kEta">—</dd>
+          <span class="delta" id="kEtaSub">not started</span></div>
+        <div class="tile"><dt>Delivered</dt><dd class="tnum" id="kSent">0 B</dd>
+          <span class="delta" id="kSentSub">of 0 B</span></div>
+      </dl>
+
+      <!-- Features 5, 6 -->
+      <div class="controls" id="controls">
+        <button class="btn" id="pauseBtn" type="button" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg>
+          <span id="pauseLbl">Pause</span>
+        </button>
+        <button class="btn btn-danger" id="cancelBtn" type="button" disabled>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          Cancel
+        </button>
+      </div>
+
+      <div class="peers" id="peers2"></div>
+
+      <!-- Feature 11 -->
+      <details class="opts" id="clipBox">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+          Send Text or a Link
+        </summary>
+        <div class="body">
+          <div class="field">
+            <label for="clipText">Text to send</label>
+            <textarea id="clipText" placeholder="Paste a link or any text…"></textarea>
+          </div>
+          <div class="pair">
+            <button class="btn" id="pasteBtn" type="button">Paste From Clipboard</button>
+            <button class="btn" id="sendClipBtn" type="button" disabled>Send Text</button>
+          </div>
+          <div class="clipfeed" id="clipFeed"></div>
+        </div>
+      </details>
+
+      <details class="chat" id="chatBox">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 12a8.5 8.5 0 1 1-4.2-7.3"/><path d="M3.5 20.5l1.4-4.2"/></svg>
+          Chat With Receiver
+          <span class="unread" id="unread" hidden>0</span>
+        </summary>
+        <div class="body">
+          <div class="log" id="log" role="log" aria-label="Chat messages"></div>
+          <form class="cf" id="chatForm">
+            <label class="sr" for="chatIn">Message to receiver</label>
+            <input id="chatIn" type="text" placeholder="Type a message…"
+                   autocomplete="off" enterkeyhint="send" maxlength="2000">
+            <button class="btn" type="submit">Send</button>
+          </form>
+        </div>
+      </details>
+
+      <!-- Feature 9 -->
+      <details class="opts" id="histBox">
+        <summary>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          Transfer History
+        </summary>
+        <div class="body">
+          <div class="histwrap" id="histWrap"></div>
+          <button class="btn btn-ghost btn-danger btn-sm" id="histClear" type="button">Clear History</button>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <div class="bar">
+    <button class="btn back" id="backBtn" type="button" disabled>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      <span class="sr">Go back</span>
+    </button>
+    <button class="btn btn-cta main" id="nextBtn" type="button" disabled>Continue</button>
   </div>
+
+  <p class="sr" role="status" aria-live="polite" id="ann"></p>
 </div>
 
-<div class="container">
-  <h2>P2P File Share <span style="font-size:0.8em;">&#128274;</span></h2>
-  <!-- Circular Progress Indicator (hidden by default, shown only during transfer) -->
-<div id="progressCircleContainer" style="position:relative;">
-  <svg id="circularProgress" width="160" height="160">
-    <circle cx="80" cy="80" r="74" stroke="#222c" stroke-width="12" fill="none"/>
-    <circle id="circularBar" cx="80" cy="80" r="74" stroke="#00ffae" stroke-width="12" fill="none"
-      stroke-linecap="round"
-      stroke-dasharray="464.95571273128947"
-      stroke-dashoffset="464.95571273128947"
-      transform="rotate(-90 80 80)"/>
-  </svg>
-  <span id="circularPercent" style="z-index:2;"></span>
-  <div id="transferStats" style="
-    position: absolute;
-    top: 50%;
-    left: 180px;
-    transform: translateY(-50%);
-    min-width: 120px;
-    text-align: left;
-    margin-left: 10px;
-    font-size: 1em;
-    color: #00ffae;
-    display: none;
-    line-height: 1.6;
-    ">
-    <div id="speedStat"></div>
-    <div id="etaStat"></div>
+<!-- ======================= DIALOGS ======================= -->
+<dialog id="confirmDlg" aria-labelledby="cdT">
+  <h2 id="cdT">Remove All Files?</h2>
+  <p>This clears <span class="tnum" id="cdCount">0 items</span> from the queue.
+     You can add them again afterwards.</p>
+  <div class="dlgacts">
+    <button class="btn" type="button" id="cdNo" autofocus>Keep Files</button>
+    <button class="btn btn-danger" type="button" id="cdYes">Remove All</button>
   </div>
-</div>
-  <canvas id="qrCanvas" style="margin-top: 10px; display: none;"></canvas>
-  <div class="filePreview" id="filePreview"></div>
-  <div id="dropZone">Drop files/folders here or click to select</div>
-  <div id="selectButtonsContainer" style="display: none; flex-direction: row; gap: 10px; margin-top: 10px;">
-    <button id="selectFilesBtn" style="flex: 1;">📄 Select Files</button>
-    <button id="selectFolderBtn" style="flex: 1;">📁 Select Folder</button>
+</dialog>
+
+<dialog id="cancelDlg" aria-labelledby="xdT">
+  <h2 id="xdT">Cancel Transfer?</h2>
+  <p>Partial files on the receiving device will be discarded.</p>
+  <div class="dlgacts">
+    <button class="btn" type="button" id="xdNo" autofocus>Keep Going</button>
+    <button class="btn btn-danger" type="button" id="xdYes">Cancel Transfer</button>
   </div>
-  <button id="removeBtn" style="display: none; margin-top:10px;">Remove All Files</button>
-  <button id="sendBtn" style="display: none; margin-top:10px;">Send File</button>
-  <button id="newInstanceBtn" style="margin-top:10px; display:none;">Start New Instance</button>
-  <p style="position: relative; display: inline-block; width: 100%; margin: 0;">
-    <span id="copyMsg">Copied!</span>
-    <span id="copyLinkFloatingMsg" style="display:none;position:absolute;left:50%;top:-38px;transform:translateX(-50%);background:#181f23;color:#00ffae;font-size:1em;padding:6px 20px;border-radius:10px;box-shadow:0 2px 12px #00ffae33;z-index:20;text-shadow:0 0 8px #00ffae99;pointer-events:none;">Copied! Share it with client to start sharing</span>
-    <span id="connKeyDisplay" style="word-break: break-word; margin-top: 15px; cursor: pointer;" title="Click to copy"></span>
-    <button id="copyLinkBtn" style="margin-top:10px;display:none;">Copy Link</button>
-  </p>
-  <div id="progressContainer">
-    <div id="progressBar"></div>
-    <div id="transferStats">
-      <span id="speedStat"></span>
-      <span id="etaStat" style="margin-left:18px;"></span>
-    </div>
+</dialog>
+
+<!-- Feature 13 -->
+<dialog id="approveDlg" aria-labelledby="adT">
+  <h2 id="adT">Allow This Device?</h2>
+  <p><strong id="approveWho"></strong> wants to receive your files.</p>
+  <div class="dlgacts">
+    <button class="btn" type="button" id="adNo">Deny</button>
+    <button class="btn btn-cta" type="button" id="adYes" style="width:auto" autofocus>Allow</button>
   </div>
-</div>
+</dialog>
 
-<!-- Processing dialog -->
-<div id="processingDialog">
-  <div>Processing...</div>
-</div>
+<!-- Feature 12 -->
+<dialog id="nameDlg" aria-labelledby="ndT">
+  <h2 id="ndT">Name This Device</h2>
+  <div class="field">
+    <label for="nameIn">Device name</label>
+    <input id="nameIn" type="text" maxlength="40" autocomplete="off">
+    <span class="note">Shown to whoever you send files to.</span>
+  </div>
+  <div class="dlgacts">
+    <button class="btn" type="button" id="ndNo">Cancel</button>
+    <button class="btn btn-cta" type="button" id="ndYes" style="width:auto">Save</button>
+  </div>
+</dialog>
 
-<!-- Add hidden folder input for folder selection -->
-<input id="hiddenFolderInput" type="file" webkitdirectory multiple style="display:none;" />
+<dialog id="busyDlg" aria-labelledby="bdT">
+  <div class="dlg-c">
+    <div class="spinner" aria-hidden="true"></div>
+    <h2 id="bdT" style="font-size:var(--text-4)">Preparing session…</h2>
+    <p style="margin:0">Setting up a direct connection.</p>
+  </div>
+</dialog>
 
+<dialog id="errDlg" aria-labelledby="edT">
+  <h2 id="edT">Something Went Wrong</h2>
+  <p id="errMsg"></p>
+  <div class="dlgacts"><button class="btn" type="button" id="errOk" autofocus>OK</button></div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+<script type="module">
+import { SendEngine } from '/js/send-engine.js';
+import { MSG, send, fmtBytes } from '/js/protocol.js';
+import {
+  deviceName, setDeviceName, sendHello, shareClipboard, readLocalClipboard,
+  copyToClipboard, renderClipboardCard, enableNotifications,
+  notifyTransferDone, notifyCancelled,
+} from '/js/extras.js';
+import { attachSenderReconnect } from '/js/reconnect.js';
+import * as history from '/js/history.js';
 
-<script>
-  const socket = io();
-  let peer;
-  let isSender = false;
-  let selectedFiles = [];
-  let hiddenFileInput = null; // For click-to-select
-  let transferStartTime = null;
-  let chatOpen = false;
-  let isTyping = false;
-  let typingTimeout = null;
-  let typingIndicatorElement = null;
-
-  // Typing indicator functions
-  function sendTypingIndicator(typing) {
-    if (peer && peer.connected) {
-      try {
-        peer.send(JSON.stringify({ type: 'typing', isTyping: typing }));
-      } catch (err) {
-        console.error('Failed to send typing indicator:', err);
-      }
-    }
-  }
-
-  function showTypingIndicator() {
-    if (!typingIndicatorElement) {
-      const chatMessages = document.getElementById('chatMessages');
-      typingIndicatorElement = document.createElement('div');
-      typingIndicatorElement.className = 'chat-message typing-indicator';
-      typingIndicatorElement.innerHTML = 'Receiver is typing<span class="typing-dots"></span>';
-      chatMessages.appendChild(typingIndicatorElement);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-  }
-
-  function hideTypingIndicator() {
-    if (typingIndicatorElement) {
-      typingIndicatorElement.remove();
-      typingIndicatorElement = null;
-    }
-  }
-
-  function handleTypingStart() {
-    if (!isTyping) {
-      isTyping = true;
-      sendTypingIndicator(true);
-    }
-    
-    // Clear existing timeout
-    if (typingTimeout) {
-      clearTimeout(typingTimeout);
-    }
-    
-    // Set new timeout to stop typing indicator
-    typingTimeout = setTimeout(() => {
-      isTyping = false;
-      sendTypingIndicator(false);
-    }, 2000); // Stop typing after 2 seconds of inactivity
-  }
-
-  function handleTypingStop() {
-    if (typingTimeout) {
-      clearTimeout(typingTimeout);
-    }
-    if (isTyping) {
-      isTyping = false;
-      sendTypingIndicator(false);
-    }
-  }
-
-  // Chat Functions
-  function toggleChat() {
-    const chatDialog = document.getElementById('chatDialog');
-    const chatBtn = document.getElementById('chatToggleBtn');
-    
-    chatOpen = !chatOpen;
-    
-    if (chatOpen) {
-      chatDialog.style.display = 'flex';
-      chatBtn.style.display = 'none';
-    } else {
-      chatDialog.style.display = 'none';
-      chatBtn.style.display = 'flex';
-    }
-  }
-
-  function addChatMessage(message, isSender = true) {
-    const chatMessages = document.getElementById('chatMessages');
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `chat-message ${isSender ? 'sender-message' : 'receiver-message'}`;
-    messageDiv.textContent = `${isSender ? 'You' : 'Receiver'}: ${message}`;
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-  }
-
-  function clearChatMessages() {
-    const chatMessages = document.getElementById('chatMessages');
-    chatMessages.innerHTML = '';
-  }
-
-  function sendChatMessage() {
-    const chatInput = document.getElementById('chatInput');
-    const message = chatInput.value.trim();
-    
-    if (message && peer && peer.connected) {
-      try {
-        peer.send(JSON.stringify({ type: 'chat', message: message }));
-        addChatMessage(message, true);
-        chatInput.value = '';
-      } catch (err) {
-        console.error('Failed to send chat message:', err);
-      }
-    }
-  }
-
-  // --- Theme Toggle Logic ---
-  function setTheme(mode) {
-    if (mode === 'light') {
-      document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #f8fafc 0%, #e2e8f0 100%)');
-      document.documentElement.style.setProperty('--container-bg', 'rgba(255,255,255,0.97)');
-      document.documentElement.style.setProperty('--container-border', '#00bfae44');
-      document.documentElement.style.setProperty('--container-shadow', '#00bfae22');
-      document.documentElement.style.setProperty('--container-inset', '#00bfae11');
-      document.documentElement.style.setProperty('--container-text-shadow', '#00bfae88');
-      document.documentElement.style.setProperty('--main-color', '#00bfae');
-      document.documentElement.style.setProperty('--main-color-dark', '#181f23');
-      document.documentElement.style.setProperty('--button-bg', 'linear-gradient(90deg, #00bfae 0%, #00ffae 100%)');
-      document.documentElement.style.setProperty('--button-hover-bg', '#e2e8f0');
-      document.documentElement.style.setProperty('--button-hover-color', '#00bfae');
-      document.documentElement.style.setProperty('--button-hover-border', '#00bfae');
-      document.documentElement.style.setProperty('--remove-btn-bg', '#e2e8f0');
-      document.documentElement.style.setProperty('--remove-btn-color', '#00bfae');
-      document.documentElement.style.setProperty('--remove-btn-hover-bg', '#00bfae');
-      document.documentElement.style.setProperty('--remove-btn-hover-color', '#e2e8f0');
-      document.documentElement.style.setProperty('--progress-bg', 'rgba(0,191,174,0.03)');
-      document.documentElement.style.setProperty('--progress-bar-bg', 'linear-gradient(90deg, #00bfae 0%, #00ffae 100%)');
-      document.documentElement.style.setProperty('--progress-bar-shadow', '#00bfae99');
-      document.documentElement.style.setProperty('--progress-container-bg', 'rgba(0,191,174,0.08)');
-      document.documentElement.style.setProperty('--progress-container-shadow', '#00bfae33');
-      document.documentElement.style.setProperty('--file-row-bg', 'inherit');
-      document.documentElement.style.setProperty('--file-row-color', 'inherit');
-      document.documentElement.style.setProperty('--selection-bg', '#00bfae44');
-      document.getElementById('themeToggleBtn').innerText = '🌞 Light Mode';
-    } else {
-      document.documentElement.style.setProperty('--bg-gradient', 'radial-gradient(ellipse at top left, #232b36 0%, #0f2027 100%)');
-      document.documentElement.style.setProperty('--container-bg', 'rgba(20, 30, 40, 0.95)');
-      document.documentElement.style.setProperty('--container-border', '#00ffae44');
-      document.documentElement.style.setProperty('--container-shadow', '#00ffae22');
-      document.documentElement.style.setProperty('--container-inset', '#00ffae11');
-      document.documentElement.style.setProperty('--container-text-shadow', '#00ffae88');
-      document.documentElement.style.setProperty('--main-color', '#00ffae');
-      document.documentElement.style.setProperty('--main-color-dark', '#181f23');
-      document.documentElement.style.setProperty('--button-bg', 'linear-gradient(90deg, #00ffae 0%, #00bfae 100%)');
-      document.documentElement.style.setProperty('--button-hover-bg', '#181f23');
-      document.documentElement.style.setProperty('--button-hover-color', '#00ffae');
-      document.documentElement.style.setProperty('--button-hover-border', '#00ffae');
-      document.documentElement.style.setProperty('--remove-btn-bg', '#181f23');
-      document.documentElement.style.setProperty('--remove-btn-color', '#00ffae');
-      document.documentElement.style.setProperty('--remove-btn-hover-bg', '#00ffae');
-      document.documentElement.style.setProperty('--remove-btn-hover-color', '#181f23');
-      document.documentElement.style.setProperty('--progress-bg', 'rgba(0,255,174,0.03)');
-      document.documentElement.style.setProperty('--progress-bar-bg', 'linear-gradient(90deg, #00ffae 0%, #00bfae 100%)');
-      document.documentElement.style.setProperty('--progress-bar-shadow', '#00ffae99');
-      document.documentElement.style.setProperty('--progress-container-bg', 'rgba(0,255,174,0.08)');
-      document.documentElement.style.setProperty('--progress-container-shadow', '#00ffae33');
-      document.documentElement.style.setProperty('--file-row-bg', 'inherit');
-      document.documentElement.style.setProperty('--file-row-color', 'inherit');
-      document.documentElement.style.setProperty('--selection-bg', '#00ffae44');
-      document.getElementById('themeToggleBtn').innerText = '🌙 Dark Mode';
-    }
-    localStorage.setItem('theme', mode);
-  }
-
-  function showProcessingDialog() {
-    document.getElementById('processingDialog').style.display = 'flex';
-  }
-  function hideProcessingDialog() {
-    document.getElementById('processingDialog').style.display = 'none';
-  }
-
-  // Show/hide the circular progress bar only during transfer
-  function updateProgress(percent) {
-    // Linear bar (keep for fallback)
-    const bar = document.getElementById('progressBar');
-    const container = document.getElementById('progressContainer');
-    bar.style.width = percent + '%';
-    container.style.display = 'block';
-
-    // Circular progress (show only during transfer)
-    const circleContainer = document.getElementById('progressCircleContainer');
-    const circle = document.getElementById('circularBar');
-    const percentText = document.getElementById('circularPercent');
-    const radius = 74;
-    const circumference = 2 * Math.PI * radius;
-    if (circle) {
-      circle.style.strokeDasharray = circumference;
-      circle.style.strokeDashoffset = circumference - (percent / 100) * circumference;
-    }
-    if (percentText) {
-      percentText.textContent = percent >= 100 ? "Completed!" : Math.floor(percent) + "%";
-    }
-    // Always show the circle during and after transfer
-    circleContainer.style.display = "block";
-
-    // --- Transfer speed and ETA ---
-    const statsDiv = document.getElementById('transferStats');
-    const speedSpan = document.getElementById('speedStat');
-    const etaSpan = document.getElementById('etaStat');
-    if (typeof updateProgress.sentBytes === "undefined") updateProgress.sentBytes = 0;
-    if (typeof updateProgress.totalBytes === "undefined") updateProgress.totalBytes = 0;
-
-    if (updateProgress.totalBytes > 0) {
-      statsDiv.style.display = "block";
-      const now = Date.now();
-      if (!transferStartTime) {
-        transferStartTime = now;
-      }
-      const elapsed = (now - transferStartTime) / 1000;
-      const bytesSent = updateProgress.sentBytes;
-      const speed = elapsed > 0 ? (bytesSent / elapsed) : 0;
-      const speedStr = speed > 1024 * 1024
-        ? (speed / (1024 * 1024)).toFixed(2) + " MB/s"
-        : (speed / 1024).toFixed(2) + " KB/s";
-      speedSpan.textContent = `Speed: ${speedStr}`;
-
-      const remaining = updateProgress.totalBytes - bytesSent;
-      const eta = speed > 0 ? remaining / speed : 0;
-      etaSpan.textContent = percent >= 100 ? "ETA: 0s" : `ETA: ${eta > 0 ? Math.ceil(eta) + "s" : "0s"}`;
-    } else {
-      statsDiv.style.display = "none";
-    }
-  }
-
-  function startSender() {
-    isSender = true;
-    peer = new SimplePeer({ initiator: true, trickle: false });
-
-    // Show placeholder key instantly for faster feedback
-    document.getElementById('connKeyDisplay').innerText = "Conn Key: ...";
-    const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-    if (!nextElem || !nextElem.textContent.includes("Share this key")) {
-      document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
-    }
-    const qrCanvas = document.getElementById('qrCanvas');
-    qrCanvas.style.display = "block";
-    new QRious({
-      element: qrCanvas,
-      value: "...",
-      size: 200
-    });
-
-    // Continue with signaling as before
-    peer.on('signal', signal => {
-      if (signal && signal.type === "offer") {
-        showProcessingDialog();
-      }
-      socket.emit('register-offer', { signal });
-    });
-
-    socket.on('offer-registered', data => {
-      hideProcessingDialog();
-      // Update the connection key and QR code with the real value from the server
-      document.getElementById('connKeyDisplay').innerText = "Conn Key: " + data.connKey;
-      // Remove any previous instructions to avoid duplicates
-      const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-      if (!nextElem || !nextElem.textContent.includes("Share this key")) {
-        document.getElementById('connKeyDisplay').insertAdjacentHTML('afterend', '<p style="margin-top:10px;">Share this key with receiver to share files</p>');
-      }
-      const qrCanvas = document.getElementById('qrCanvas');
-      qrCanvas.style.display = "block";
-      new QRious({
-        element: qrCanvas,
-        value: data.connKey,
-        size: 200
-      });
-      // Show only Copy Link button
-      document.getElementById('copyLinkBtn').style.display = 'inline-block';
-      // ...existing code...
-document.getElementById('copyLinkBtn').onclick = function() {
-  let link = 'https://dropit-n1pk.onrender.com/reciever.html?key=' + encodeURIComponent(data.connKey);
-  // Copy to clipboard
-  const tempInput = document.createElement('input');
-  tempInput.value = link;
-  document.body.appendChild(tempInput);
-  tempInput.select();
-  tempInput.setSelectionRange(0, 99999);
-  document.execCommand('copy');
-  document.body.removeChild(tempInput);
-  document.getElementById('copyLinkBtn').innerText = 'Copied!';
-  // Show floating message
-  const floatingMsg = document.getElementById('copyLinkFloatingMsg');
-  floatingMsg.style.display = 'block';
-  setTimeout(() => {
-    floatingMsg.style.display = 'none';
-    document.getElementById('copyLinkBtn').innerText = 'Copy Link';
-  }, 1500);
+const $ = (id) => document.getElementById(id);
+const ann = (m) => { $('ann').textContent = m; };
+const esc = (s) => String(s).replace(/[&<>"']/g,
+  (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const fmtDur = (s) => {
+  if (!Number.isFinite(s) || s < 0) return '—';
+  if (s < 60) return Math.ceil(s) + 's';
+  const m = Math.floor(s / 60);
+  return m < 60 ? `${m}m ${Math.round(s % 60)}s` : `${Math.floor(m / 60)}h ${m % 60}m`;
 };
-// ...existing code...
-    });
+function showErr(msg) { $('errMsg').textContent = msg; if (!$('errDlg').open) $('errDlg').showModal(); }
+$('errOk').onclick = () => $('errDlg').close();
 
-    socket.on('deliver-answer', signal => {
-      peer.signal(signal);
-      alert("✅ Connection established! You can now select and send files.");
-      document.getElementById('sendBtn').style.display = "block";
-      showFilePreview();
-      // Remove the Conn Key and instructions
-      document.getElementById('connKeyDisplay').innerText = "";
-      const nextElem = document.getElementById('connKeyDisplay').nextElementSibling;
-      if (nextElem && nextElem.tagName === "P" && nextElem.textContent.includes("Share this key")) {
-        nextElem.remove();
-      }
-      // Hide the QR code after connection is established
-      document.getElementById('qrCanvas').style.display = "none";
-      // Show the "Start New Instance" button and attach the reload event
-      document.getElementById('newInstanceBtn').style.display = "block";
-      document.getElementById('newInstanceBtn').onclick = () => location.reload();
-      // Show dropZone for file selection
-      document.getElementById('dropZone').style.display = 'block';
-      // Show select buttons container
-      document.getElementById('selectButtonsContainer').style.display = 'flex';
-      // Show chat button
-      document.getElementById('chatToggleBtn').style.display = 'flex';
-    });
+/* ------------------------------------------------ theme (persisted) */
+function applyTheme(dark) {
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  $('themeColor').setAttribute('content', dark ? '#020617' : '#F8FAFC');
+  $('themeBtn').setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+  localStorage.setItem('dropit.theme', dark ? 'dark' : 'light');
+}
+(function () {
+  const saved = localStorage.getItem('dropit.theme');
+  applyTheme(saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+})();
+$('themeBtn').onclick = () => applyTheme(document.documentElement.dataset.theme !== 'dark');
 
-    // Handle incoming chat messages
-    peer.on('data', data => {
-      let parsed = null;
-      try {
-        const text = new TextDecoder().decode(data);
-        parsed = JSON.parse(text);
-      } catch (err) {
-        // Not JSON, ignore
-      }
-      
-      if (parsed && parsed.type === 'chat') {
-        addChatMessage(parsed.message, false);
-      } else if (parsed && parsed.type === 'typing') {
-        // Handle typing indicator
-        if (parsed.isTyping) {
-          showTypingIndicator();
-        } else {
-          hideTypingIndicator();
-        }
-      }
-    });
+/* ------------------------------------------------ device name (12) */
+$('myName').textContent = deviceName();
+$('renameBtn').onclick = () => { $('nameIn').value = deviceName(); $('nameDlg').showModal(); };
+$('ndNo').onclick = () => $('nameDlg').close();
+$('ndYes').onclick = () => {
+  const v = $('nameIn').value.trim();
+  if (v) { setDeviceName(v); $('myName').textContent = deviceName(); state.deviceName = deviceName(); }
+  $('nameDlg').close();
+  ann('Device renamed.');
+};
 
-    document.getElementById('removeBtn').addEventListener('click', () => {
-      selectedFiles = [];
-      showFilePreview();
-    });
+/* ------------------------------------------------ state */
+const socket = io();
+const state = { roomCode: null, resumeToken: null, deviceName: deviceName() };
+const peers = new Map();   // receiverId -> { peer, engine, name, connected, stats }
+let files = [];
+let running = false, paused = false, expiresAt = 0;
 
-    document.getElementById('sendBtn').addEventListener('click', () => {
-      if (!selectedFiles.length) {
-        alert("Please select file(s) first.");
-        return;
-      }
-      if (!peer.connected) {
-        alert("Connection not established yet. Please wait for the receiver.");
-        return;
-      }
-      sendFiles(selectedFiles);
-    });
+attachSenderReconnect(socket, state, {
+  onResumed: (room) => { expiresAt = room.expiresAt; setWait('Reconnected — session restored.'); },
+  onError: (e) => { if (e && e.code === 'resume-failed') showErr('The session expired. Reload to start a new one.'); },
+});
+
+/* ------------------------------------------------ step machine */
+let step = 1;
+function go(n) {
+  step = Math.max(1, Math.min(3, n));
+  [1, 2, 3].forEach((i) => $('p' + i).classList.toggle('on', i === step));
+  $('stepOf').textContent = `Step ${step} of 3`;
+  [...document.querySelectorAll('.track i')].forEach((el, i) => el.classList.toggle('on', i < step));
+  $('backBtn').disabled = step === 1 || running;
+  syncCta();
+  ann(`Step ${step} of 3.`);
+}
+const livePeers = () => [...peers.values()].filter((p) => p.connected);
+function syncCta() {
+  const b = $('nextBtn');
+  if (step === 1) {
+    b.textContent = 'Continue';
+    b.disabled = !files.length;
+  } else if (step === 2) {
+    const n = livePeers().length;
+    b.textContent = n ? `Start Sending${n > 1 ? ` to ${n} devices` : ''}` : 'Waiting for receiver…';
+    b.disabled = !n || !files.length;
+  } else {
+    b.textContent = running ? 'Sending…' : (pctOverall() >= 100 ? 'Send More' : 'Start Sending');
+    b.disabled = running || !livePeers().length;
   }
+}
+$('backBtn').onclick = () => go(step - 1);
+$('nextBtn').onclick = () => {
+  if (step === 1) return go(2);
+  if (step === 2) { go(3); startTransfer(); return; }
+  if (step === 3 && !running) { resetProgress(); go(1); }
+};
 
-  // --- Unified progress for all files ---
-  function sendFiles(files) {
-    const chunkSize = 256 * 1024;
-    let totalBytes = 0;
-    let sentBytes = 0;
-
-    // Calculate total bytes to send (all files)
-    for (const file of files) {
-      totalBytes += file.size;
-    }
-    updateProgress.totalBytes = totalBytes;
-
-    function sendFile(index) {
-      if (index >= files.length) {
-        updateProgress.sentBytes = totalBytes;
-        updateProgress(100);
-        return;
-      }
-
-      const file = files[index];
-      const meta = { 
-        name: file.name, 
-        size: file.size, 
-        type: file.type,
-        relativePath: file.relativePath || file.webkitRelativePath || file.name
-      };
-      peer.send(JSON.stringify({ type: 'file-meta', meta }));
-
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        const buffer = e.target.result;
-        let offset = 0;
-
-        function sendNextChunk() {
-          if (offset < buffer.byteLength) {
-            const chunk = buffer.slice(offset, offset + chunkSize);
-            // Wait if the buffer is too full
-            if (peer.bufferedAmount > 2 * 1024 * 1024) { // 2MB threshold
-              setTimeout(sendNextChunk, 20);
-              return;
-            }
-            peer.send(chunk);
-            offset += chunkSize;
-            sentBytes += chunk.byteLength || chunk.length;
-            updateProgress.sentBytes = sentBytes;
-            const percent = Math.min(100, (sentBytes / totalBytes) * 100);
-            updateProgress(percent);
-            setTimeout(sendNextChunk, 0); // Yield to event loop
-          } else {
-            sendFile(index + 1);
-          }
-        }
-
-        sendNextChunk();
-      };
-
-      reader.readAsArrayBuffer(file);
-    }
-
-    // Start progress at 0 and show the circle
-    sentBytes = 0;
-    updateProgress.sentBytes = 0;
-    updateProgress.totalBytes = totalBytes;
-    transferStartTime = null;
-    updateProgress(0);
-    document.getElementById('progressCircleContainer').style.display = "block";
-    sendFile(0);
-  }
-
-  function showFilePreview() {
-    let previewDiv = document.getElementById('filePreview');
-    previewDiv.innerHTML = "";
-    const removeBtn = document.getElementById('removeBtn');
-    if (!selectedFiles || selectedFiles.length === 0) {
-      removeBtn.style.display = "none";
-      return;
-    } else {
-      removeBtn.style.display = "block";
-    }
-    const maxFiles = 5;
-    for (let i = 0; i < Math.min(selectedFiles.length, maxFiles); i++) {
-      const file = selectedFiles[i];
-      const row = document.createElement('div');
-      row.className = 'file-row';
-      const span = document.createElement('span');
-      // Show only filename, but indicate if it's from a folder with an icon
-      span.textContent = `📄 ${file.name}`;
-      row.appendChild(span);
-      const removeBtnSingle = document.createElement('button');
-      removeBtnSingle.textContent = '❌';
-      removeBtnSingle.className = 'remove-single-btn';
-      removeBtnSingle.onclick = () => {
-        selectedFiles.splice(i, 1);
-        showFilePreview();
-      };
-      row.appendChild(removeBtnSingle);
-      previewDiv.appendChild(row);
-    }
-    if (selectedFiles.length > 5) {
-      const more = document.createElement('p');
-      more.textContent = `+${selectedFiles.length - 5} more file(s)...`;
-      more.style.fontStyle = 'italic';
-      previewDiv.appendChild(more);
-    }
-  }
-
-  // Event Listeners
-  document.getElementById('chatToggleBtn').addEventListener('click', toggleChat);
-  document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
-  document.getElementById('chatInput').addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') {
-      sendChatMessage();
-    }
+/* ------------------------------------------------ room (1,2,3,4,13) */
+function createRoom() {
+  if (!$('busyDlg').open) $('busyDlg').showModal();
+  socket.emit('create-room', {
+    password: $('optPw').value,
+    maxReceivers: Math.min(8, Math.max(1, parseInt($('optMax').value, 10) || 1)),
+    ttlSeconds: parseInt($('optTtl').value, 10) || 1800,
+    requireApproval: $('optApprove').checked,
+    deviceName: state.deviceName,
   });
-  
-  // Add typing indicator event listeners
-  document.getElementById('chatInput').addEventListener('input', handleTypingStart);
-  document.getElementById('chatInput').addEventListener('blur', handleTypingStop);
+}
+socket.on('connect', () => { if (!state.roomCode) createRoom(); });
 
-  window.onload = function() {
-    // Theme toggle button
-    const themeBtn = document.getElementById('themeToggleBtn');
-    let currentTheme = localStorage.getItem('theme') || 'dark';
-    setTheme(currentTheme);
-    themeBtn.onclick = function() {
-      currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
-      setTheme(currentTheme);
-    };
-    startSender();
-    const dropZone = document.getElementById('dropZone');
-    
-    // Create hidden file inputs for click-to-select
-    hiddenFileInput = document.createElement('input');
-    hiddenFileInput.type = 'file';
-    hiddenFileInput.multiple = true;
-    hiddenFileInput.style.display = 'none';
-    document.body.appendChild(hiddenFileInput);
-    
-    // Click on dropZone opens file dialog
-    dropZone.addEventListener('click', () => {
-      hiddenFileInput.value = '';
-      hiddenFileInput.click();
-    });
-    
-    // Select Files button
-    document.getElementById('selectFilesBtn').addEventListener('click', () => {
-      hiddenFileInput.value = '';
-      hiddenFileInput.click();
-    });
-    
-    // Select Folder button
-    document.getElementById('selectFolderBtn').addEventListener('click', () => {
-      document.getElementById('hiddenFolderInput').value = '';
-      document.getElementById('hiddenFolderInput').click();
-    });
-    
-    // Handle file selection from dialog
-    hiddenFileInput.addEventListener('change', (e) => {
-      const newFiles = Array.from(e.target.files);
-      addFilesToSelection(newFiles);
-    });
-    
-    // Handle folder selection from dialog
-    document.getElementById('hiddenFolderInput').addEventListener('change', (e) => {
-      const newFiles = Array.from(e.target.files);
-      addFilesToSelection(newFiles, true);
-    });
-    
-    // Function to add files to selection with folder support
-    function addFilesToSelection(newFiles, isFolder = false) {
-      let addedCount = 0;
-      newFiles.forEach(newFile => {
-        if (!selectedFiles.some(f => f.webkitRelativePath === newFile.webkitRelativePath && f.name === newFile.name && f.size === newFile.size) && selectedFiles.length < 25) {
-          // Preserve folder structure information
-          if (isFolder && newFile.webkitRelativePath) {
-            newFile.relativePath = newFile.webkitRelativePath;
-          }
-          selectedFiles.push(newFile);
-          addedCount++;
-        }
-      });
-      
-      if (selectedFiles.length >= 25 && addedCount > 0) {
-        alert("You can select a maximum of 25 files.");
-      }
-      
-      if (addedCount > 0) {
-        showFilePreview();
-      }
-    }
-    // Drag events
-    dropZone.addEventListener('dragover', e => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
-    dropZone.addEventListener('dragleave', e => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-    });
-    dropZone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      handleDroppedItems(e.dataTransfer);
-    });
-    
-    // Function to handle dropped files and folders
-    async function handleDroppedItems(dataTransfer) {
-      const items = Array.from(dataTransfer.items);
-      const files = [];
-      
-      for (const item of items) {
-        if (item.kind === 'file') {
-          const entry = item.webkitGetAsEntry();
-          if (entry) {
-            await processEntry(entry, files);
-          }
-        }
-      }
-      
-      if (files.length > 0) {
-        addFilesToSelection(files, true);
-      }
-    }
-    
-    // Recursive function to process file/folder entries
-    async function processEntry(entry, files, path = '') {
-      if (entry.isFile) {
-        const file = await new Promise((resolve) => {
-          entry.file(resolve);
-        });
-        // Add relative path info for folder structure
-        file.relativePath = path + file.name;
-        files.push(file);
-      } else if (entry.isDirectory) {
-        const reader = entry.createReader();
-        const entries = await new Promise((resolve) => {
-          reader.readEntries(resolve);
-        });
-        
-        for (const childEntry of entries) {
-          await processEntry(childEntry, files, path + entry.name + '/');
-        }
-      }
-    }
+socket.on('room-created', (room) => {
+  try { $('busyDlg').close(); } catch {}
+  state.roomCode = room.code;
+  state.resumeToken = room.resumeToken;
+  expiresAt = room.expiresAt;
 
-    // --- Copy Conn Key to clipboard on click ---
-    const connKeyDisplay = document.getElementById('connKeyDisplay');
-    const copyMsg = document.getElementById('copyMsg');
-    connKeyDisplay.addEventListener('click', function() {
-      const text = connKeyDisplay.innerText.replace(/^Conn Key:\s*/, '').trim();
-      if (text) {
-        copyMsg.style.display = 'block';
-        navigator.clipboard.writeText(text).then(() => {
-          copyMsg.style.display = 'block';
-          setTimeout(() => { copyMsg.style.display = 'none'; }, 1200);
-        });
-      }
-    });
+  const link = `${location.origin}/reciever.html?key=${encodeURIComponent(room.code)}`;
+  state.link = link;
+  $('keyText').textContent = room.code;
+  $('keyText').setAttribute('aria-label', `Session key ${room.code.split('').join(' ')}, activate to copy`);
+  $('qr').setAttribute('aria-label', `QR code for session key ${room.code}`);
+  new QRious({ element: $('qr'), value: link, size: 154, padding: 0, level: 'M' });
+  $('copyBtn').disabled = false;
+  setWait(room.requireApproval
+    ? 'Waiting for a receiver — you will be asked to approve.'
+    : 'Waiting for a receiver to connect…');
+  ann('Session key ready.');
+});
+
+$('applyOpts').onclick = () => {
+  for (const p of peers.values()) { try { p.peer.destroy(); } catch {} }
+  peers.clear(); renderPeers();
+  socket.emit('leave-room', { code: state.roomCode });
+  state.roomCode = null; state.resumeToken = null;
+  createRoom();
+  ann('New key generated with the new options.');
+};
+
+/* TTL countdown (feature 2) */
+setInterval(() => {
+  if (!expiresAt) { $('ttl').textContent = '—'; return; }
+  const left = Math.max(0, expiresAt - Date.now());
+  const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+  $('ttl').textContent = left ? `${m}:${String(s).padStart(2, '0')}` : 'expired';
+}, 1000);
+
+socket.on('room-touched', (d) => { expiresAt = d.expiresAt; });
+socket.on('room-closed', (d) => {
+  expiresAt = 0;
+  setWait(`Session closed (${d.reason}). Reload to start a new one.`);
+});
+
+function setWait(text, live = false) {
+  $('waitText').textContent = text;
+  $('waitRow').classList.toggle('live', live);
+}
+
+/* ------------------------------------------------ approval (13) */
+const approvalQueue = [];
+let approving = false;
+socket.on('receiver-joined', ({ receiverId, name, approved }) => {
+  if (approved) return connectTo(receiverId, name);
+  approvalQueue.push({ receiverId, name });
+  pumpApproval();
+});
+function pumpApproval() {
+  if (approving || !approvalQueue.length) return;
+  approving = true;
+  const { receiverId, name } = approvalQueue.shift();
+  $('approveWho').textContent = name;
+  $('approveDlg').showModal();
+  const decide = (ok) => {
+    $('approveDlg').close();
+    socket.emit('approve-receiver', { code: state.roomCode, receiverId, approved: ok });
+    if (ok) connectTo(receiverId, name);
+    else ann(`${name} denied.`);
+    approving = false;
+    pumpApproval();
   };
+  $('adYes').onclick = () => decide(true);
+  $('adNo').onclick = () => decide(false);
+}
+socket.on('receiver-left', ({ receiverId }) => {
+  const p = peers.get(receiverId);
+  if (p) { try { p.peer.destroy(); } catch {} peers.delete(receiverId); }
+  renderPeers(); syncCta();
+});
+
+/* ------------------------------------------------ one peer per receiver (4) */
+function connectTo(receiverId, name) {
+  const peer = new SimplePeer({ initiator: true, trickle: true });
+  const entry = { peer, engine: null, name, connected: false, stats: null };
+  peers.set(receiverId, entry);
+  renderPeers();
+
+  peer.on('signal', (signal) =>
+    socket.emit('signal', { code: state.roomCode, receiverId, signal }));
+
+  peer.on('connect', () => {
+    entry.connected = true;
+    sendHello(peer, { role: 'sender' });
+    setWait(`${entry.name} connected — ready to send.`, true);
+    renderPeers(); syncCta();
+    ann(`${entry.name} connected.`);
+  });
+
+  entry.engine = new SendEngine(peer, {
+    onProgress: (s) => { entry.stats = s; paintProgress(); },
+    onState: (phase) => {
+      if (phase === 'declined') ann(`${entry.name} declined the transfer.`);
+      renderPeers();
+    },
+    onAllDone: ({ cancelled, bytes, ms }) => {
+      if (cancelled) notifyCancelled(entry.name);
+      else notifyTransferDone(files.length, bytes, entry.name);
+    },
+    onError: (err) => { ann(`Transfer error: ${err.message}`); },
+  });
+
+  peer.on('data', (data) => {
+    let msg = null;
+    try { msg = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(data)); } catch {}
+    if (!msg || !msg.type) return;
+    if (msg.type === MSG.HELLO) { entry.name = msg.name || entry.name; renderPeers(); }
+    else if (msg.type === MSG.CHAT) addMsg(msg.message, false, entry.name);
+    else if (msg.type === MSG.TYPING) showTyping(!!msg.isTyping, entry.name);
+    else if (msg.type === MSG.CLIPBOARD) renderClipboardCard(msg, $('clipFeed'));
+    else entry.engine.handleControl(msg);
+  });
+
+  peer.on('error', (err) => { entry.connected = false; renderPeers(); syncCta();
+                              ann(`${entry.name}: ${err.message}`); });
+  peer.on('close', () => { entry.connected = false; renderPeers(); syncCta(); });
+}
+
+socket.on('signal', ({ receiverId, signal }) => {
+  const p = peers.get(receiverId);
+  if (p) { try { p.peer.signal(signal); } catch {} }
+});
+
+socket.on('error', (e) => {
+  try { $('busyDlg').close(); } catch {}
+  if (e && e.code === 'resume-failed') return;
+  showErr((e && e.message) || 'Signalling error.');
+});
+
+function renderPeers() {
+  const html = peers.size ? [...peers.entries()].map(([rid, p]) => {
+    const cls = p.connected ? 'live' : 'wait';
+    const st = p.connected
+      ? (p.stats ? `${Math.floor(p.stats.percent)}%` : 'ready')
+      : 'connecting…';
+    return `<div class="peer ${cls}"><span class="dot" aria-hidden="true"></span>
+      <span class="pn">${esc(p.name)}</span><span class="ps tnum">${st}</span></div>`;
+  }).join('') : '';
+  $('peers').innerHTML = html;
+  $('peers2').innerHTML = html;
+}
+
+/* ------------------------------------------------ file queue */
+const IC = {
+  file: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14.5 3v4.5H19"/></svg>',
+  folder: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.4l2 2h7.6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg>',
+};
+const totalBytes = () => files.reduce((n, f) => n + f.size, 0);
+
+function renderFiles() {
+  $('rows').innerHTML = files.length ? files.map((f, i) => {
+    const label = f.relativePath || f.name;
+    const inFolder = label.includes('/');
+    return `<div class="row">
+      <span class="ft ${inFolder ? 'dir' : ''}" aria-hidden="true">${IC[inFolder ? 'folder' : 'file']}</span>
+      <span class="m"><span class="n" title="${esc(label)}">${esc(label)}</span>
+        <span class="s tnum">${fmtBytes(f.size)}</span></span>
+      <button class="x" type="button" data-rm="${i}" aria-label="Remove ${esc(f.name)} from queue">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button></div>`;
+  }).join('') : '<p class="empty">Nothing selected yet.</p>';
+
+  $('sumSize').textContent = fmtBytes(totalBytes());
+  $('sumCount').textContent = `across ${files.length} item${files.length === 1 ? '' : 's'}`;
+  $('kSentSub').textContent = `of ${fmtBytes(totalBytes())}`;
+  $('clearBtn').disabled = !files.length || running;
+  syncCta();
+}
+
+$('rows').addEventListener('click', (e) => {
+  const rm = e.target.closest('[data-rm]');
+  if (!rm || running) return;
+  const gone = files.splice(+rm.dataset.rm, 1)[0];
+  renderFiles();
+  ann(`${gone.name} removed.`);
+});
+
+function addFiles(list) {
+  let added = 0;
+  for (const f of list) {
+    const path = f.relativePath || f.webkitRelativePath || f.name;
+    if (files.some((e) => (e.relativePath || e.name) === path && e.size === f.size)) continue;
+    try { f.relativePath = path; } catch {}
+    files.push(f);
+    added++;
+  }
+  renderFiles();
+  ann(added ? `${added} item${added === 1 ? '' : 's'} added.` : 'Already in the queue.');
+}
+
+$('pickFiles').onclick = () => $('fileInput').click();
+$('pickFolder').onclick = () => $('folderInput').click();
+$('drop').onclick = () => $('fileInput').click();
+$('fileInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+$('folderInput').onchange = (e) => { addFiles(e.target.files); e.target.value = ''; };
+
+['dragover', 'dragenter'].forEach((ev) =>
+  $('drop').addEventListener(ev, (e) => { e.preventDefault(); $('drop').classList.add('over'); }));
+['dragleave', 'dragend'].forEach((ev) =>
+  $('drop').addEventListener(ev, (e) => { e.preventDefault(); $('drop').classList.remove('over'); }));
+$('drop').addEventListener('drop', async (e) => {
+  e.preventDefault();
+  $('drop').classList.remove('over');
+  const entries = Array.from(e.dataTransfer.items || [])
+    .map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+  if (entries.length) {
+    const out = [];
+    for (const en of entries) await walk(en, out, '');
+    addFiles(out);
+  } else {
+    addFiles(e.dataTransfer.files);
+  }
+});
+async function walk(entry, out, path) {
+  if (entry.isFile) {
+    const f = await new Promise((res, rej) => entry.file(res, rej));
+    try { f.relativePath = path + entry.name; } catch {}
+    out.push(f);
+  } else if (entry.isDirectory) {
+    const rd = entry.createReader();
+    // readEntries returns at most 100 per call — keep reading until empty.
+    for (;;) {
+      const kids = await new Promise((res, rej) => rd.readEntries(res, rej));
+      if (!kids.length) break;
+      for (const k of kids) await walk(k, out, path + entry.name + '/');
+    }
+  }
+}
+
+$('clearBtn').onclick = () => {
+  $('cdCount').textContent = `${files.length} item${files.length === 1 ? '' : 's'}`;
+  $('confirmDlg').showModal();
+};
+$('cdNo').onclick = () => $('confirmDlg').close();
+$('cdYes').onclick = () => { files = []; renderFiles(); $('confirmDlg').close(); ann('Queue cleared.'); };
+
+/* ------------------------------------------------ sparkline */
+const N = 24, W = 200, H = 42;
+let hist = Array(N).fill(0);
+function drawSpark() {
+  const max = Math.max(1, ...hist) * 1.15;
+  const pts = hist.map((v, i) => [i * (W / (N - 1)), H - 1 - (v / max) * (H - 4)]);
+  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  $('sparkLine').setAttribute('d', line);
+  $('sparkArea').setAttribute('d', `${line} L${W} ${H} L0 ${H} Z`);
+}
+function sparkAt(clientX) {
+  const r = $('spark').getBoundingClientRect();
+  const k = Math.max(0, Math.min(N - 1, Math.round(((clientX - r.left) / r.width) * (N - 1))));
+  const max = Math.max(1, ...hist) * 1.15;
+  const x = k * (W / (N - 1)), y = H - 1 - (hist[k] / max) * (H - 4);
+  $('sparkCross').setAttribute('x1', x); $('sparkCross').setAttribute('x2', x);
+  $('sparkPt').setAttribute('cx', x); $('sparkPt').setAttribute('cy', y);
+  $('spark').classList.add('on');
+  const tip = $('sparkTip');
+  tip.textContent = `${fmtBytes(hist[k])}/s · ${N - k} ago`;
+  tip.style.left = (x / W * 100) + '%'; tip.style.top = (y / H * 100) + '%';
+  tip.classList.add('on');
+}
+const sparkOff = () => { $('spark').classList.remove('on'); $('sparkTip').classList.remove('on'); };
+$('spark').addEventListener('pointermove', (e) => sparkAt(e.clientX));
+$('spark').addEventListener('pointerleave', sparkOff);
+$('spark').addEventListener('focus', () => {
+  const r = $('spark').getBoundingClientRect(); sparkAt(r.right - 2);
+});
+$('spark').addEventListener('blur', sparkOff);
+
+/* ------------------------------------------------ progress (aggregate) */
+let sampler = null, lastSent = 0, prevThru = 0, startedAt = 0;
+const sentOverall = () => [...peers.values()].reduce((n, p) => n + (p.stats ? p.stats.sent : 0), 0);
+function pctOverall() {
+  const n = livePeers().length || 1;
+  const denom = totalBytes() * n;
+  return denom ? Math.min(100, (sentOverall() / denom) * 100) : 0;
+}
+
+function paintProgress() {
+  const pct = pctOverall();
+  $('meterFill').style.width = pct.toFixed(2) + '%';
+  $('heroPct').textContent = Math.floor(pct) + '%';
+  $('meter').setAttribute('aria-valuenow', Math.floor(pct));
+  $('kSent').textContent = fmtBytes(sentOverall());
+  renderPeers();
+}
+
+function resetProgress() {
+  for (const p of peers.values()) p.stats = null;
+  lastSent = prevThru = 0; paused = false;
+  hist = Array(N).fill(0); drawSpark();
+  $('meter').classList.remove('paused');
+  $('kThru').textContent = '0 B/s';
+  $('kDelta').textContent = 'awaiting start'; $('kDelta').className = 'delta';
+  $('kEta').textContent = '—'; $('kEtaSub').textContent = 'not started';
+  $('heroSub').textContent = 'Waiting to start';
+  paintProgress();
+}
+
+function startSampler() {
+  const n = livePeers().length || 1;
+  const denom = totalBytes() * n;
+  sampler = setInterval(() => {
+    const now = sentOverall();
+    const thru = Math.max(0, (now - lastSent) * 4);     // 250 ms window
+    lastSent = now;
+    hist.push(thru); hist.shift(); drawSpark();
+    $('kThru').textContent = fmtBytes(thru) + '/s';
+
+    const d = thru - prevThru; prevThru = thru;
+    $('kDelta').textContent = `${d >= 0 ? '▲' : '▼'} ${fmtBytes(Math.abs(d))}/s`;
+    $('kDelta').className = 'delta ' + (d >= 0 ? 'up' : 'dn');
+
+    const eta = thru > 0 ? (denom - now) / thru : Infinity;
+    const done = pctOverall() >= 100;
+    $('kEta').textContent = done ? '0s' : fmtDur(eta);
+    $('kEtaSub').textContent = done ? 'finished'
+      : paused ? 'paused' : (thru > 0 ? 'at current rate' : 'stalled');
+  }, 250);
+}
+
+async function startTransfer() {
+  const live = livePeers();
+  if (running || !files.length || !live.length) return;
+  running = true; resetProgress(); startedAt = Date.now();
+  startSampler();
+  $('pauseBtn').disabled = false; $('cancelBtn').disabled = false;
+  syncCta(); renderFiles();
+  await enableNotifications();
+  $('heroSub').textContent = live.length > 1
+    ? `Sending to ${live.length} devices` : `Sending to ${live[0].name}`;
+  ann('Transfer started.');
+
+  const results = await Promise.allSettled(
+    live.map((p) => p.engine.sendAll(files, { requireApproval: true }))
+  );
+
+  running = false;
+  clearInterval(sampler); sampler = null;
+  $('pauseBtn').disabled = true; $('cancelBtn').disabled = true;
+
+  const declined = results.filter((r) => r.value && r.value.declined).length;
+  const cancelled = results.some((r) => r.value && r.value.cancelled);
+  const bytes = sentOverall();
+
+  $('heroSub').textContent = cancelled ? 'Transfer cancelled'
+    : declined === results.length ? 'The receiver declined'
+    : 'All items delivered';
+
+  history.record({                                     // Feature 9
+    direction: 'sent',
+    peerName: live.map((p) => p.name).join(', '),
+    roomCode: state.roomCode,
+    files: files.map((f) => ({ name: f.name, size: f.size, mime: f.type })),
+    totalBytes: bytes,
+    durationMs: Date.now() - startedAt,
+    status: cancelled ? 'cancelled' : declined === results.length ? 'failed' : 'complete',
+  });
+  renderHistory();
+  syncCta(); renderFiles();
+  ann(cancelled ? 'Transfer cancelled.'
+    : `Transfer complete. ${fmtBytes(bytes)} in ${fmtDur((Date.now() - startedAt) / 1000)}.`);
+}
+
+/* Features 5 + 6 */
+$('pauseBtn').onclick = () => {
+  paused = !paused;
+  for (const p of peers.values()) { if (p.engine) paused ? p.engine.pause() : p.engine.resume(); }
+  $('pauseLbl').textContent = paused ? 'Resume' : 'Pause';
+  $('meter').classList.toggle('paused', paused);
+  $('heroSub').textContent = paused ? 'Paused' : 'Sending…';
+  ann(paused ? 'Transfer paused.' : 'Transfer resumed.');
+};
+$('cancelBtn').onclick = () => $('cancelDlg').showModal();
+$('xdNo').onclick = () => $('cancelDlg').close();
+$('xdYes').onclick = () => {
+  $('cancelDlg').close();
+  for (const p of peers.values()) { if (p.engine) p.engine.cancelAll(); }
+  ann('Cancelling…');
+};
+
+/* ------------------------------------------------ clipboard (11) */
+$('clipText').addEventListener('input', () => {
+  $('sendClipBtn').disabled = !$('clipText').value.trim();
+});
+$('pasteBtn').onclick = async () => {
+  try {
+    $('clipText').value = await readLocalClipboard();
+    $('sendClipBtn').disabled = !$('clipText').value.trim();
+  } catch { showErr('Clipboard read was blocked. Paste into the box instead.'); }
+};
+$('sendClipBtn').onclick = async () => {
+  const text = $('clipText').value;
+  const live = livePeers();
+  if (!live.length) return showErr('No receiver is connected.');
+  try {
+    for (const p of live) await shareClipboard(p.peer, text);
+    renderClipboardCard({ text, isUrl: /^https?:\/\/\S+$/i.test(text.trim()), at: Date.now() },
+                        $('clipFeed'));
+    $('clipText').value = ''; $('sendClipBtn').disabled = true;
+    ann('Text sent.');
+  } catch (err) { showErr(err.message); }
+};
+
+/* ------------------------------------------------ chat */
+let unread = 0, typingEl = null, typingTimer = null;
+function addMsg(text, mine, who) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + (mine ? 'me' : 'them');
+  d.textContent = (!mine && peers.size > 1 && who) ? `${who}: ${text}` : text;
+  if (typingEl) $('log').insertBefore(d, typingEl); else $('log').appendChild(d);
+  $('log').scrollTop = $('log').scrollHeight;
+  if (!mine && !$('chatBox').open) {
+    unread++; $('unread').textContent = unread; $('unread').hidden = false;
+    ann('New message from the receiver.');
+  }
+}
+$('chatBox').addEventListener('toggle', () => {
+  if ($('chatBox').open) { unread = 0; $('unread').hidden = true; }
+});
+$('chatForm').onsubmit = (e) => {
+  e.preventDefault();
+  const v = $('chatIn').value.trim();
+  const live = livePeers();
+  if (!v || !live.length) return;
+  for (const p of live) { try { send(p.peer, { type: MSG.CHAT, message: v }); } catch {} }
+  addMsg(v, true);
+  $('chatIn').value = '';
+  pushTyping(false);
+};
+$('chatIn').addEventListener('input', () => {
+  pushTyping(true);
+  clearTimeout(typingTimer);
+  typingTimer = setTimeout(() => pushTyping(false), 1200);
+});
+function pushTyping(on) {
+  for (const p of livePeers()) { try { send(p.peer, { type: MSG.TYPING, isTyping: on }); } catch {} }
+}
+function showTyping(on, who) {
+  if (on && !typingEl) {
+    typingEl = document.createElement('div');
+    typingEl.className = 'msg them typing';
+    typingEl.textContent = `${who || 'Receiver'} is typing…`;
+    $('log').appendChild(typingEl);
+    $('log').scrollTop = $('log').scrollHeight;
+  } else if (!on && typingEl) { typingEl.remove(); typingEl = null; }
+}
+
+/* ------------------------------------------------ history (9) */
+function renderHistory() { history.render($('histWrap')); }
+$('histClear').onclick = () => { history.clear(); renderHistory(); ann('History cleared.'); };
+
+/* ------------------------------------------------ guard + boot */
+addEventListener('beforeunload', (e) => { if (running) { e.preventDefault(); e.returnValue = ''; } });
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+drawSpark(); renderFiles(); resetProgress(); renderHistory(); go(1);
 </script>
 </body>
 </html>
