@@ -1,13 +1,8 @@
-"""Resumable chunked uploads, over HTTP against a live server.
 
-The point of the feature is that an interrupted upload costs one part
-rather than the whole transfer, so the centre of this suite is: send some
-parts, stop, ask what arrived, send only the rest, and check the bytes are
-identical to what a single-shot upload would have produced.
-"""
 import hashlib
 import json
 import os
+import time
 import sys
 import urllib.error
 import urllib.parse
@@ -184,5 +179,51 @@ check("oversize refused up front", st == 413, st)
 st, r = init("empty.bin", 0)
 check("empty refused up front", st == 413, st)
 
+
+print("\n=== 11. a slow part must not block other parts ===")
+# write_part once held a threading.Lock across stream.read(). Under
+# eventlet, a greenlet blocked on a real lock cannot be rescheduled to
+# release it, so two concurrent parts deadlocked -- and the browser
+# uploads three at a time.
+import socket      # noqa: E402
+import threading   # noqa: E402
+
+_, s = init('concurrent.bin', PART * 2)
+uid3 = s["uploadId"]
+p3 = s["partSize"]
+_parsed = urllib.parse.urlsplit(URL)
+_slow_done = []
+
+
+def _dribble():
+    sock = socket.create_connection((_parsed.hostname, _parsed.port), timeout=30)
+    body = min(p3, PART * 2)
+    head = ('PUT /api/upload/' + uid3 + '/0 HTTP/1.1' + chr(13) + chr(10)
+            + 'Host: ' + _parsed.netloc + chr(13) + chr(10)
+            + 'Content-Type: application/octet-stream' + chr(13) + chr(10)
+            + 'Content-Length: ' + str(body) + chr(13) + chr(10)
+            + chr(13) + chr(10)).encode()
+    sock.sendall(head)
+    sent = 0
+    while sent < body:
+        n = min(32768, body - sent)
+        sock.sendall(b'x' * n)
+        sent += n
+        time.sleep(0.02)
+    _slow_done.append(sock.recv(64)[:15])
+    sock.close()
+
+
+_t = threading.Thread(target=_dribble, daemon=True)
+_t.start()
+time.sleep(0.5)                 # let it get mid-read
+_t0 = time.time()
+st, r = put_part(uid3, 1, PAYLOAD[p3:min(2 * p3, PART * 2)])
+_elapsed = time.time() - _t0
+check("a concurrent part is not blocked by a slow one",
+      st == 200 and _elapsed < 5, f'status {st} after {_elapsed:.1f}s')
+_t.join(timeout=30)
+check("the slow part completed too", bool(_slow_done), _slow_done)
+call("/api/upload/" + uid3, method="DELETE")
 print(f"\n{'=' * 46}\n  {PASS} passed, {FAIL} failed\n{'=' * 46}")
 raise SystemExit(1 if FAIL else 0)

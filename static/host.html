@@ -212,6 +212,15 @@ function oneShotUpload(started) {
   xhr.upload.onprogress = (e) => {
     if (!e.lengthComputable) return;
     const pct = (e.loaded / e.total) * 100;
+    if (e.loaded >= e.total) {
+      // Same gap as the resumable path: the bytes are sent, but the reply
+      // only comes once the server has hashed and stored them.
+      $('upPct').textContent = '100%';
+      $('upBytes').textContent = 'Finalising - hashing and storing';
+      $('upRate').textContent = '';
+      $('upFill').style.width = '100%';
+      return;
+    }
     $('upFill').style.width = pct.toFixed(1) + '%';
     $('upMeter').setAttribute('aria-valuenow', Math.floor(pct));
     $('upPct').textContent = Math.floor(pct) + '%';
@@ -269,6 +278,14 @@ $('uploadBtn').onclick = async () => {
   };
 
   try {
+    // The bar hits 100% when the last part lands, but the server still has
+    // to hash the file and push it to storage. Say so, or it looks frozen.
+    up.onFinalising = () => {
+      $('upPct').textContent = '100%';
+      $('upBytes').textContent = 'Finalising - hashing and storing';
+      $('upRate').textContent = '';
+      ann('Upload received. Finalising.');
+    };
     const data = await up.start();
     showResult(data);
     remember(data);

@@ -11,6 +11,8 @@ export class ResumableUpload {
     this.aborted = false;
     this.controllers = new Set();
     this.onProgress = () => {};
+    // Called once every part has landed, while the server hashes and stores.
+    this.onFinalising = () => {};
   }
 
   async start() {
@@ -37,6 +39,7 @@ export class ResumableUpload {
                                  worker));
     if (this.aborted) throw new Error('Upload cancelled.');
 
+    this.onFinalising();
     const res = await fetch(`/api/upload/${this.id}/finish`, { method: 'POST' });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || `Finish failed (${res.status}).`);

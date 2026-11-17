@@ -1,7 +1,7 @@
 /* DropIT service worker — caches the app shell only.
    Signalling (/socket.io/) and object URLs are never cached. */
 
-const VERSION = 'dropit-v1';
+const VERSION = 'dropit-v2';
 const SHELL = [
   '/',
   '/index.html',
@@ -15,6 +15,8 @@ const SHELL = [
   '/js/history.js',
   '/js/extras.js',
   '/js/reconnect.js',
+  '/js/uploader.js',
+  '/host.html',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -86,15 +88,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(req).then((hit) =>
-      hit || fetch(req).then((res) => {
-        if (res && res.ok && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
-        }
-        return res;
-      })
-    )
-  );
+  const save = (res) => {
+    if (res && res.ok && res.type === 'basic') {
+      const copy = res.clone();
+      caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
+    }
+    return res;
+  };
+
+  // Code is network-first: cache-first with a fixed VERSION meant an edited
+  // script was served from cache forever, so deploys silently did nothing.
+  // Everything else (icons, manifest) stays cache-first.
+  if (/\.(?:js|mjs|css)$/.test(url.pathname)) {
+    event.respondWith(fetch(req).then(save).catch(() => caches.match(req)));
+    return;
+  }
+
+  event.respondWith(caches.match(req).then((hit) => hit || fetch(req).then(save)));
 });

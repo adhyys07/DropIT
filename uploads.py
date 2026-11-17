@@ -1,6 +1,5 @@
 import os
 import secrets
-import threading
 import time
 
 import index_db
@@ -9,15 +8,6 @@ import storage
 PART_SIZE = int(os.environ.get("UPLOAD_PART_SIZE", 8 * 1024 * 1024))
 SESSION_TTL = int(os.environ.get("UPLOAD_SESSION_TTL", 24 * 3600))
 MAX_PARTS = 10000
-
-_locks: dict[str, threading.Lock] = {}
-_locks_guard = threading.Lock()
-
-
-def _lock(uid: str) -> threading.Lock:
-    with _locks_guard:
-        return _locks.setdefault(uid, threading.Lock())
-
 
 def _session_dir() -> str:
     d = os.path.join(storage.TEMP_DIR, "sessions")
@@ -85,20 +75,24 @@ def write_part(uid: str, idx: int, stream, declared: int | None = None) -> dict:
     if not os.path.exists(dest):
         raise KeyError("This upload's scratch file is gone.")
 
+    # No lock here, deliberately. Parts occupy disjoint byte ranges, so
+    # concurrent writers never overlap -- and holding a threading.Lock
+    # across stream.read() deadlocks under eventlet, because a greenlet
+    # blocked on a real lock cannot be rescheduled to release it.
     written = 0
-    with _lock(uid):
-        with open(dest, "r+b") as f:
-            f.seek(offset)
-            while written < expect:
-                chunk = stream.read(min(256 * 1024, expect - written))
-                if not chunk:
-                    break
-                f.write(chunk)
-                written += len(chunk)
-        if written != expect:
-            raise ValueError(f"Part {idx} arrived short: {written} of {expect}.")
-        index_db.upload_part_done(uid, idx, written)
-        index_db.upload_touch(uid)
+    with open(dest, "r+b") as f:
+        f.seek(offset)
+        while written < expect:
+            chunk = stream.read(min(256 * 1024, expect - written))
+            if not chunk:
+                break
+            f.write(chunk)
+            written += len(chunk)
+    if written != expect:
+        # Leave it unrecorded so the client retries this part.
+        raise ValueError(f"Part {idx} arrived short: {written} of {expect}.")
+    index_db.upload_part_done(uid, idx, written)
+    index_db.upload_touch(uid)
 
     return {"index": idx, "bytes": written,
             "received": len(index_db.upload_received(uid)), "parts": nparts}
@@ -125,9 +119,7 @@ def finish(uid: str, ip: str) -> dict:
         meta = storage.save_file(dest, sess["name"], sess["ttl_key"], ip)
     finally:
         index_db.upload_drop(uid)
-        with _locks_guard:
-            _locks.pop(uid, None)
-    return meta
+        return meta
 
 def abort(uid: str) -> bool:
     sess = index_db.upload_get(uid)
@@ -138,8 +130,6 @@ def abort(uid: str) -> bool:
     except OSError:
         pass
     index_db.upload_drop(uid)
-    with _locks_guard:
-        _locks.pop(uid, None)
     return True
 
 def sweep() -> int:
