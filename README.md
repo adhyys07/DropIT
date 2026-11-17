@@ -105,21 +105,6 @@ pip install -r requirements-dev.txt
 bash tests/run.sh
 ```
 
-Seven suites: static checks, the signalling protocol against a live server, the
-data path pushing real bytes through both engines (corruption, reordering,
-duplicate frames, pause, cancel, resume), hosted mode (upload, download, XSS
-hardening, quotas, dedup, deletion), the storage backends plus the SQLite index
-(key layout, presigned-URL hardening, orphan sweeps, reference counting), and
-storage compression (skip rules, abandoned attempts, dedup encoding, and the
-gzip and identity download paths), and the Hack Club CDN backend (multipart
-envelope, upload-id tracking, refused gzip commits, capability flags).
-
-The CDN suite drives a fake HTTPS connection, so it needs no API key and
-spends no quota.
-
-The backend suite drives a fake S3 client, so it runs without `boto3` and
-without a bucket. It proves our logic, not Amazon's.
-
 ---
 
 ## Deploying
@@ -238,35 +223,6 @@ The ceiling is your API key's quota tier (`unverified`, `verified`,
 for your own project's files, worth thinking hard about for a public uploader
 that anyone can post to.
 
-#### Expiry, in two layers
-
-The reaper handles exact per-file TTLs. Add a lifecycle rule as a backstop so
-nothing leaks forever if the server is down when something expires:
-
-```bash
-aws s3api put-bucket-lifecycle-configuration --bucket dropit-files \
-  --lifecycle-configuration '{"Rules":[{
-    "ID":"backstop-delete","Status":"Enabled",
-    "Filter":{"Prefix":"blobs/"},
-    "Expiration":{"Days":8},
-    "AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}'
-```
-
-Eight days sits just past the longest TTL DropIT offers. The multipart rule
-matters more than it looks: abandoned multipart uploads do not appear in
-listings but you are still billed for them.
-
-For blobs orphaned by a process dying mid-upload:
-
-```bash
-python -c "import storage; print(storage.sweep_orphans(dry_run=True))"
-```
-
-Run it rarely. On a bucket it is a paid `LIST` over everything.
-
-> **Untested against a real bucket.** The S3 path has only ever run against a
-> fake client in the test suite. Expect to shake out a wrinkle on your first
-> live upload.
 
 ## Desktop App
 
