@@ -368,10 +368,6 @@ def hosted_file(fid, name):
             resp.headers["Content-Range"] = f"bytes */{size}"
 
         elif rng:
-            # Ranges are always answered from the inflated representation, so
-            # offsets mean what the client thinks they mean. Resuming near the
-            # end of a large file costs a full inflate to reach the offset,
-            # which is still far better than restarting the download.
             first, last = rng
 
             def pump_range(blob_path=path, first=first, last=last):
