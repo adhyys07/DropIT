@@ -1,4 +1,15 @@
 
+import eventlet
+
+eventlet.monkey_patch(socket=True, select=True)
+
+# Load .env before importing any project module. storage, backends and
+# uploads all read their configuration at import time, so loading it even
+# one import later leaves STORAGE_BACKEND and CDN_TOKEN unseen.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv()
+
 import gzip
 import hashlib
 import hmac
@@ -10,13 +21,8 @@ import base64
 from urllib.parse import unquote
 import mimetypes
 
-# Load .env before importing storage. storage imports backends, which reads
-# its configuration at import time, so loading any later is too late.
-from dotenv import load_dotenv
-
-load_dotenv()
-
-import storage  # noqa: E402
+import storage   # noqa: E402
+import uploads   # noqa: E402
 
 from flask import Flask, redirect, request, send_from_directory, stream_with_context, send_file, jsonify, Response, abort
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -171,6 +177,7 @@ def reaper():
         if HOSTING_ENABLED:
             try:
                 n = storage.reap()
+                uploads.sweep()
                 if n:
                     print(f"[reap] {n} hosted file(s) expired", flush=True)
             except Exception as err:                     
@@ -252,6 +259,101 @@ def static_files(path):
     if path.endswith(".js"):
         resp.headers["Content-Type"] = "text/javascript; charset=utf-8"
     return resp
+
+@app.route("/api/upload/init", methods=["POST"])
+def api_upload_init():
+    if not HOSTING_ENABLED:
+        return jsonify({"error": "File hosting is disabled on this server."}), 403
+
+    body = request.get_json(silent=True) or {}
+    try:
+        size = int(body.get("size", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "A numeric size is required."}), 400
+
+    filename = body.get("name") or "file"
+    ip = client_ip()
+
+    if (not storage.supports_disposition()
+            and os.path.splitext(storage.clean_name(filename))[1].lower()
+            in storage.SCRIPTABLE):
+        return jsonify({"error": "This server cannot host scriptable file types "
+                                 "safely. Use direct send instead."}), 415
+
+    # Size before quota, so an oversize file is told it is too large rather
+    # than being handed a misleading hourly-limit message.
+    if size > storage.MAX_FILE_BYTES:
+        return jsonify({"error": "File too large.",
+                        "maxBytes": storage.MAX_FILE_BYTES}), 413
+
+    reason = storage.rate_limited(ip, size)
+    if reason:
+        return jsonify({"error": reason}), 429
+
+    ttl_key = (body.get("ttl") or storage.DEFAULT_TTL).lower()
+    try:
+        return jsonify(uploads.begin(filename, size, ttl_key, ip))
+    except storage.TooLarge as err:
+        return jsonify({"error": str(err)}), 413
+    except storage.OutOfSpace as err:
+        return jsonify({"error": str(err)}), 507
+
+
+@app.route("/api/upload/<uid>", methods=["GET"])
+def api_upload_status(uid):
+    st = uploads.status(uid)
+    return jsonify(st) if st else (jsonify({"error": "No such upload."}), 404)
+
+
+@app.route("/api/upload/<uid>/<int:idx>", methods=["PUT"])
+def api_upload_part(uid, idx):
+    try:
+        return jsonify(uploads.write_part(uid, idx, request.stream,
+                                          request.content_length))
+    except KeyError as err:
+        # str() on a KeyError quotes the message; args[0] is the text.
+        return jsonify({"error": err.args[0] if err.args else "Not found."}), 404
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except (RuntimeError, OSError) as err:
+        print(f"[upload] part {idx} of {uid} failed: {err}", flush=True)
+        return jsonify({"error": "Could not store that part."}), 502
+
+
+@app.route("/api/upload/<uid>/finish", methods=["POST"])
+def api_upload_finish(uid):
+    try:
+        meta = uploads.finish(uid, client_ip())
+    except KeyError as err:
+        # str() on a KeyError quotes the message; args[0] is the text.
+        return jsonify({"error": err.args[0] if err.args else "Not found."}), 404
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 409      # resumable: send the rest
+    except storage.TooLarge as err:
+        return jsonify({"error": str(err)}), 413
+    except storage.OutOfSpace as err:
+        return jsonify({"error": str(err)}), 507
+    except (RuntimeError, OSError) as err:
+        print(f"[upload] finishing {uid} failed: {err}", flush=True)
+        return jsonify({"error": "Storage is unavailable right now."}), 502
+
+    base = request.url_root.rstrip("/")
+    return jsonify({
+        "id": meta["id"], "name": meta["name"], "size": meta["size"],
+        "sha256": meta["sha256"],
+        "url": f"{base}/f/{meta['id']}/{meta['name']}",
+        "deleteUrl": f"{base}/api/file/{meta['id']}?token={meta['deleteToken']}",
+        "deleteToken": meta["deleteToken"],
+        "expiresAt": int(meta["expires"] * 1000),
+        "ttl": meta["ttlKey"],
+    })
+
+
+@app.route("/api/upload/<uid>", methods=["DELETE"])
+def api_upload_cancel(uid):
+    return (jsonify({"cancelled": True}) if uploads.abort(uid)
+            else (jsonify({"error": "No such upload."}), 404))
+
 
 
 @app.route("/healthz")
@@ -344,6 +446,57 @@ def parse_byte_range(header: str | None, size: int):
         return False
     return first, min(last, size - 1)
 
+def proxy_open(meta, first=None, last=None):
+    try:
+        up = storage.open_blob(meta, first, last)
+    except Exception as err:
+        print(f"[serve] remote storage failed for {meta['id']}: {err}", flush=True)
+        abort(502)
+    if up is None:
+        abort(404)
+    return up
+
+def relay(up, limit=None):
+    def gen():
+        left = limit
+        try:
+            while left is None or left > 0:
+                want = 256 * 1024 if left is None else min(256 * 1024, left)
+                chunk = up.read(want)
+                if not chunk:
+                    break
+                if left is not None:
+                    left -= len(chunk)
+                yield chunk
+        finally:
+            try:
+                up.close()
+            except Exception:
+                pass
+    return gen
+
+def relay_inflated(up, first=0, limit=None):
+    def gen():
+        try:
+            with gzip.GzipFile(fileobj=up, mode="rb") as gz:
+                if first:
+                    gz.seek(first)     
+                left = limit
+                while left is None or left > 0:
+                    want = 256 * 1024 if left is None else min(256 * 1024, left)
+                    chunk = gz.read(want)
+                    if not chunk:
+                        break
+                    if left is not None:
+                        left -= len(chunk)
+                    yield chunk
+        finally:
+            try:
+                up.close()
+            except Exception:
+                pass
+    return gen
+
 
 @app.route("/f/<fid>", defaults={"name": None})
 @app.route("/f/<fid>/<path:name>")
@@ -368,12 +521,67 @@ def hosted_file(fid, name):
         return resp
 
     path = storage.blob_for(meta)
-    if not path or not os.path.exists(path):
+    disposition = f'{"inline" if inline else "attachment"}; filename="{meta["name"]}"'
+    serve_mime = guessed if inline else "application/octet-stream"
+
+    if path is None:
+        storage.note_download(fid)
+        size = meta["size"]
+        rng = parse_byte_range(request.headers.get("Range"), size)
+
+        if rng is False:
+            resp = Response(status=416)
+            resp.headers["Content-Range"] = f"bytes */{size}"
+
+        elif meta.get("enc") == "gzip":
+            if rng:
+                first, last = rng
+                up = proxy_open(meta)
+                resp = Response(
+                    stream_with_context(
+                        relay_inflated(up, first, last - first + 1)()),
+                    status=206, mimetype=serve_mime)
+                resp.headers["Content-Range"] = f"bytes {first}-{last}/{size}"
+                resp.headers["Content-Length"] = str(last - first + 1)
+            elif "gzip" in request.headers.get("Accept-Encoding", "").lower():
+                # Relay the compressed bytes untouched: our egress is the
+                # stored size and the browser does the inflating.
+                up = proxy_open(meta)
+                resp = Response(stream_with_context(relay(up)()),
+                                mimetype=serve_mime)
+                resp.headers["Content-Encoding"] = "gzip"
+                resp.headers["Content-Length"] = str(meta["stored"])
+                resp.headers["X-DropIT-Uncompressed-Length"] = str(size)
+            else:
+                up = proxy_open(meta)
+                resp = Response(stream_with_context(relay_inflated(up)()),
+                                mimetype=serve_mime)
+                resp.headers["Content-Length"] = str(size)
+            resp.headers["Vary"] = "Accept-Encoding"
+
+        else:
+            # Stored verbatim, so stored offsets are plaintext offsets and
+            # the range can go straight to the backend.
+            first, last = rng if rng else (None, None)
+            up = proxy_open(meta, first, last)
+            limit = (last - first + 1) if rng else None
+            resp = Response(stream_with_context(relay(up, limit)()),
+                            status=206 if rng else 200, mimetype=serve_mime)
+            if rng:
+                resp.headers["Content-Range"] = f"bytes {first}-{last}/{size}"
+                resp.headers["Content-Length"] = str(limit)
+            else:
+                resp.headers["Content-Length"] = str(size)
+
+        resp.headers["Accept-Ranges"] = "bytes"
+        resp.headers["X-DropIT-Hosted"] = "1"
+        resp.headers["Content-Disposition"] = disposition
+        return resp
+
+    if not os.path.exists(path):
         abort(404)
 
     storage.note_download(fid)
-    disposition = f'{"inline" if inline else "attachment"}; filename="{meta["name"]}"'
-    serve_mime = guessed if inline else "application/octet-stream"
 
     if meta.get("enc") == "gzip":
         size = meta["size"]
@@ -471,8 +679,8 @@ def api_hosting():
         "compressionRatio": round(stored / logical, 3) if logical else 1.0,
         "files": count,
         "backend": storage.backend_name(),
-        # False means the backend serves files with its own headers, so the
-        # upload page should not promise a forced download.
+        "resumable": True,
+        "partSize" : uploads.PART_SIZE,
         "forcesDownload": storage.supports_disposition(),
         "enforcesExpiry": storage.enforces_expiry(),
     }

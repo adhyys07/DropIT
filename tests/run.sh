@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 # backend, even when .env points at one. load_dotenv does not override
 # variables that are already set, so these win.
 export STORAGE_BACKEND=local
+# Small parts so the resumable suite exercises real multi-part
+# behaviour instead of a single part that can never be resumed.
+export UPLOAD_PART_SIZE=65536
 unset CDN_TOKEN
 
 PORT="${PORT:-5099}"
@@ -63,6 +66,10 @@ echo "=== compression ==="
 python tests/test_compression.py
 compress_rc=$?
 
+echo "=== resumable uploads ==="
+python tests/test_resumable.py
+resume_rc=$?
+
 echo
 echo "======================================"
 printf '  static     %s\n' "$([ $static_rc -eq 0 ] && echo PASS || echo FAIL)"
@@ -72,9 +79,10 @@ printf '  hosting    %s\n' "$([ $hosting_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  backends   %s\n' "$([ $backend_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  compress   %s\n' "$([ $compress_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  cdn        %s\n' "$([ $cdn_rc -eq 0 ] && echo PASS || echo FAIL)"
+printf '  resumable  %s\n' "$([ $resume_rc -eq 0 ] && echo PASS || echo FAIL)"
 echo "======================================"
 
-if [ $((static_rc + proto_rc + engine_rc + hosting_rc + backend_rc + compress_rc + cdn_rc)) -ne 0 ]; then
+if [ $((static_rc + proto_rc + engine_rc + hosting_rc + backend_rc + compress_rc + cdn_rc + resume_rc)) -ne 0 ]; then
   echo
   echo "--- server log ---"
   cat "$LOG"

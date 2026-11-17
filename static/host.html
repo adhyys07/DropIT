@@ -122,6 +122,7 @@
 <script type="module">
 import { fmtBytes } from '/js/protocol.js';
 import { copyToClipboard } from '/js/extras.js';
+import { ResumableUpload } from '/js/uploader.js';
 
 const $ = (id) => document.getElementById(id);
 const ann = (m) => { $('ann').textContent = m; };
@@ -201,13 +202,7 @@ $('drop').addEventListener('drop', (e) => {
 
 /* ---------- upload (XHR: fetch still has no upload progress) ---------- */
 let xhr = null;
-$('uploadBtn').onclick = () => {
-  if (!chosen || xhr) return;
-  const started = Date.now();
-  $('upRow').hidden = false;
-  $('result').hidden = true;
-  $('uploadBtn').disabled = true;
-
+function oneShotUpload(started) {
   xhr = new XMLHttpRequest();
   xhr.open('POST', `/api/upload?ttl=${encodeURIComponent($('ttlSel').value)}`);
   // Header values must be latin-1; percent-encode and decode server side.
@@ -242,8 +237,54 @@ $('uploadBtn').onclick = () => {
   xhr.onerror = () => { finish(); showErr('Network error during upload.'); };
   xhr.onabort = () => { finish(); ann('Upload cancelled.'); };
   xhr.send(chosen);
+}
+
+/* Small files go in one request. Large ones use resumable parts, so a
+   dropped connection costs one part instead of the whole upload. */
+const RESUMABLE_ABOVE = 16 * 1024 * 1024;
+let active = null;
+
+$('uploadBtn').onclick = async () => {
+  if (!chosen || xhr || active) return;
+  const started = Date.now();
+  $('upRow').hidden = false;
+  $('result').hidden = true;
+  $('uploadBtn').disabled = true;
+
+  if (chosen.size < RESUMABLE_ABOVE || !limits.resumable) {
+    return oneShotUpload(started);
+  }
+
+  const up = new ResumableUpload(chosen, { ttl: $('ttlSel').value });
+  active = up;
+  up.onProgress = (sent, total, parts, nparts) => {
+    const pct = (sent / total) * 100;
+    $('upFill').style.width = pct.toFixed(1) + '%';
+    $('upMeter').setAttribute('aria-valuenow', Math.floor(pct));
+    $('upPct').textContent = Math.floor(pct) + '%';
+    $('upBytes').textContent = fmtBytes(sent) + ' / ' + fmtBytes(total)
+                             + ' - part ' + parts + '/' + nparts;
+    const secs = Math.max(0.001, (Date.now() - started) / 1000);
+    $('upRate').textContent = fmtBytes(sent / secs) + '/s';
+  };
+
+  try {
+    const data = await up.start();
+    showResult(data);
+    remember(data);
+    ann('Upload complete. Link ready.');
+  } catch (err) {
+    showErr(err.message || 'Upload failed.');
+  } finally {
+    active = null;
+    $('upRow').hidden = true;
+    $('uploadBtn').disabled = false;
+  }
 };
-$('abortBtn').onclick = () => { if (xhr) xhr.abort(); };
+$('abortBtn').onclick = () => {
+  if (active) active.abort();
+  else if (xhr) xhr.abort();
+};
 
 /* ---------- result ---------- */
 let current = null;

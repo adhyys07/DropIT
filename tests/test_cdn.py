@@ -91,18 +91,22 @@ try:
 except RuntimeError as err:
     check("empty token rejected", "CDN_TOKEN" in str(err), str(err))
 
-print("\n=== 2. capability flags are honest about the CDN ===")
+print("\n=== 2. proxying, not redirecting ===")
 b = cdn()
-check("cannot force a download", b.supports_disposition is False)
-check("cannot send Content-Encoding", b.supports_encoding is False)
-check("cannot enforce expiry", b.enforces_expiry is False)
-check("local backend enforces expiry", backends.LocalBackend.enforces_expiry)
-check("s3 backend enforces expiry", backends.S3Backend.enforces_expiry)
-check("local backend still can", backends.LocalBackend.supports_disposition
-      and backends.LocalBackend.supports_encoding)
-check("s3 backend still can", backends.S3Backend.supports_disposition
-      and backends.S3Backend.supports_encoding)
+# Downloads are relayed through DropIT rather than handed to the CDN, so
+# the response headers are ours again and all three capabilities return.
+check("downloads are forced", b.supports_disposition is True)
+check("compression is allowed", b.supports_encoding is True)
+check("expiry is enforceable", b.enforces_expiry is True)
+check("local backend unchanged", backends.LocalBackend.supports_disposition
+      and backends.LocalBackend.supports_encoding
+      and backends.LocalBackend.enforces_expiry)
+check("s3 backend unchanged", backends.S3Backend.supports_disposition
+      and backends.S3Backend.supports_encoding
+      and backends.S3Backend.enforces_expiry)
 check("no local path for remote blobs", b.local_path(D1) is None)
+check("no presigned url is handed out",
+      b.presigned_url(D1, "x.bin", "application/octet-stream", False) is None)
 
 print("\n=== 3. upload builds a valid multipart envelope ===")
 index_db.init()
@@ -152,9 +156,9 @@ check("remote id stored", rec and rec["id"] == "11111111-2222-3333-4444-55555555
 check("remote url stored",
       rec and rec["url"] == "https://cdn.example/11111111/aaaaaaaaaaaaaaaa.bin", rec)
 check("exists now true", b.exists(D1))
-check("presigned_url returns the cdn url",
-      b.presigned_url(D1, "report.pdf", "application/pdf", False)
-      == "https://cdn.example/11111111/aaaaaaaaaaaaaaaa.bin")
+check("the url is kept internally, not published",
+      b.presigned_url(D1, "report.pdf", "application/pdf", False) is None
+      and index_db.get_remote(D1)["url"].startswith("https://"))
 
 print("\n=== 5. a second upload of the same content is skipped ===")
 before = len(FakeConn.log)
@@ -190,14 +194,18 @@ noise = _log.getvalue()
 check("a failed delete is reported", "failed (500)" in noise, noise.strip())
 check("a failed delete still clears the record", index_db.get_remote(D2) is None)
 
-print("\n=== 7. a gzip commit is refused, not silently mis-served ===")
-tmp3 = write_temp(b"would be gzip bytes")
-try:
-    b.commit(D2, tmp3, enc="gzip")
-    check("gzip commit rejected", False, "no exception raised")
-except RuntimeError as err:
-    check("gzip commit rejected", "verbatim" in str(err), str(err))
-check("nothing recorded for it", index_db.get_remote(D2) is None)
+print("\n=== 7. a gzip commit is stored like any other ===")
+FakeConn.script = {"/api/v4/upload": (201, json.dumps({
+    "id": "99999999-8888-7777-6666-555555555555",
+    "url": "https://cdn.example/99999999/bbbbbbbbbbbbbbbb.bin",
+}).encode())}
+tmp3 = write_temp(b"pretend gzip bytes")
+check("gzip commit accepted", b.commit(D2, tmp3, enc="gzip") is True)
+check("stored byte for byte",
+      b"pretend gzip bytes" in FakeConn.log[-1]["body"])
+check("recorded for later retrieval", index_db.get_remote(D2) is not None)
+FakeConn.script["/api/v4/upload/"] = (200, b'{"deleted":true}')
+b.delete(D2)
 
 print("\n=== 8. a failed upload surfaces instead of recording a ghost ===")
 FakeConn.script = {"/api/v4/upload": (413, b'{"error":"file_too_large"}')}
@@ -251,5 +259,55 @@ try:
 finally:
     backends.BACKEND = real
 
+
+print("\n=== 12. fetch_stream asks for verbatim bytes ===")
+# The read path must never let the CDN transform the bytes: a re-encoded
+# response would break both Content-Length and the gzip framing.
+index_db.set_remote(D1, "id-1", "https://cdn.example/id-1/abc.bin")
+calls = []
+
+
+class FakeUpstream:
+    def __init__(self, req):
+        calls.append({"url": req.full_url, "headers": dict(req.headers)})
+
+    def read(self, n=-1):
+        return b""
+
+    def close(self):
+        pass
+
+
+import urllib.request as _ur  # noqa: E402
+
+_real_urlopen = _ur.urlopen
+_ur.urlopen = lambda req, timeout=None: FakeUpstream(req)
+try:
+    b.fetch_stream(D1)
+    check("identity encoding demanded",
+          calls[-1]["headers"].get("Accept-encoding") == "identity",
+          calls[-1]["headers"])
+    check("the cdn url is used",
+          calls[-1]["url"] == "https://cdn.example/id-1/abc.bin",
+          calls[-1]["url"])
+    check("no range header when none was asked for",
+          "Range" not in calls[-1]["headers"])
+
+    b.fetch_stream(D1, 100, 199)
+    check("closed range passed through",
+          calls[-1]["headers"].get("Range") == "bytes=100-199",
+          calls[-1]["headers"])
+
+    b.fetch_stream(D1, 100, None)
+    check("open-ended range passed through",
+          calls[-1]["headers"].get("Range") == "bytes=100-",
+          calls[-1]["headers"])
+
+    before = len(calls)
+    check("unknown blob yields no stream", b.fetch_stream("f" * 64) is None)
+    check("and makes no request", len(calls) == before)
+finally:
+    _ur.urlopen = _real_urlopen
+index_db.clear_remote(D1)
 print(f"\n{'=' * 46}\n  {PASS} passed, {FAIL} failed\n{'=' * 46}")
 raise SystemExit(1 if FAIL else 0)

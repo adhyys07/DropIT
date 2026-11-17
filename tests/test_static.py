@@ -41,5 +41,21 @@ for name in ["index", "sender", "reciever"]:
             bad += 1
         print(f"  {'OK  ' if ok else 'MISS'} {name}.html -> {spec}")
 
+# --- .env must load before any project module ---------------------------
+# storage, backends and uploads read their configuration at import time,
+# so a load_dotenv() placed even one import too low silently ignores .env.
+_server = (ROOT.parent / "server.py").read_text(encoding="utf-8").splitlines()
+_load_at = next((i for i, l in enumerate(_server)
+                 if l.startswith("load_dotenv(")), None)
+_project = ('import storage', 'import uploads', 'import backends',
+            'import index_db', 'import compression')
+_first_project = next((i for i, l in enumerate(_server)
+                       if l.startswith(_project)), None)
+_ok = (_load_at is not None and _first_project is not None
+       and _load_at < _first_project)
+if not _ok:
+    bad += 1
+print(f"  {'OK  ' if _ok else 'MISS'} server.py loads .env before any project import (load_dotenv at {_load_at}, first import at {_first_project})")
+
 print(f"\n{'=' * 46}\n  {'FAILURES: ' + str(bad) if bad else 'all id and path checks passed'}\n{'=' * 46}")
 sys.exit(1 if bad else 0)

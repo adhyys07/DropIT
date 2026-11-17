@@ -34,6 +34,24 @@ CREATE TABLE IF NOT EXISTS blobs (
     remote_id  TEXT    NOT NULL DEFAULT '',
     remote_url TEXT    NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS uploads (
+    id        TEXT PRIMARY KEY,
+    name      TEXT    NOT NULL,
+    size      INTEGER NOT NULL,
+    part_size INTEGER NOT NULL,
+    ttl_key   TEXT    NOT NULL,
+    ip        TEXT    NOT NULL,
+    created   REAL    NOT NULL,
+    touched   REAL    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS upload_parts (
+    upload_id TEXT    NOT NULL,
+    idx       INTEGER NOT NULL,
+    nbytes    INTEGER NOT NULL,
+    PRIMARY KEY (upload_id, idx)
+);
+
 """
 
 
@@ -163,6 +181,55 @@ def logical_usage() -> int:
         "SELECT COALESCE(SUM(size), 0) AS b FROM "
         "(SELECT DISTINCT sha256, size FROM files)").fetchone()
     return int(row["b"])
+
+def upload_new(uid, name, size, part_size, ttl_key, ip) -> None:
+    now = time.time()
+    _conn().execute(
+        "INSERT INTO uploads (id, name, size, part_size, ttl_key, ip,"
+        " created, touched) VALUES (?,?,?,?,?,?,?,?)",
+        (uid, name, size, part_size, ttl_key, ip, now, now))
+
+
+def upload_get(uid: str) -> dict | None:
+    r = _conn().execute("SELECT * FROM uploads WHERE id = ?", (uid,)).fetchone()
+    return dict(r) if r else None
+
+
+def upload_touch(uid: str) -> None:
+    _conn().execute("UPDATE uploads SET touched = ? WHERE id = ?",
+                    (time.time(), uid))
+
+
+def upload_part_done(uid: str, idx: int, nbytes: int) -> None:
+    # Re-sending a part is normal after a dropped connection.
+    _conn().execute(
+        "INSERT INTO upload_parts (upload_id, idx, nbytes) VALUES (?,?,?) "
+        "ON CONFLICT(upload_id, idx) DO UPDATE SET nbytes = excluded.nbytes",
+        (uid, idx, nbytes))
+
+
+def upload_received(uid: str) -> list[int]:
+    return [r["idx"] for r in _conn().execute(
+        "SELECT idx FROM upload_parts WHERE upload_id = ? ORDER BY idx", (uid,))]
+
+
+def upload_bytes(uid: str) -> int:
+    r = _conn().execute(
+        "SELECT COALESCE(SUM(nbytes), 0) AS n FROM upload_parts "
+        "WHERE upload_id = ?", (uid,)).fetchone()
+    return int(r["n"])
+
+
+def upload_drop(uid: str) -> None:
+    c = _conn()
+    c.execute("DELETE FROM upload_parts WHERE upload_id = ?", (uid,))
+    c.execute("DELETE FROM uploads WHERE id = ?", (uid,))
+
+
+def uploads_stale(before: float) -> list[str]:
+    return [r["id"] for r in _conn().execute(
+        "SELECT id FROM uploads WHERE touched < ?", (before,))]
+
 
 
 def expired(now: float | None = None) -> list[dict]:

@@ -125,8 +125,6 @@ def save_stream(stream, filename: str, ttl_key: str, ip: str,
     name = clean_name(filename)
     token = secrets.token_hex(8)
     tmp = os.path.join(TEMP_DIR, f"incoming-{token}")
-    # A backend that cannot send Content-Encoding would serve the gzip bytes
-    # as if they were the file, so such backends store everything verbatim.
     attempt = (compression.Attempt(os.path.join(TEMP_DIR, f"incoming-{token}.gz"))
                if compression.worth_trying(name) and backend().supports_encoding
                else None)
@@ -223,18 +221,15 @@ def blob_for(meta: dict) -> str | None:
     return backend().local_path(meta["sha256"])
 
 def remote_quota() -> dict | None:
-    """Backend-reported storage limits, when the backend has any."""
     b = backend()
     return b.quota() if hasattr(b, "quota") else None
 
 
 def enforces_expiry() -> bool:
-    """Whether a TTL on this backend is a guarantee or best effort."""
     return backend().enforces_expiry
 
 
 def supports_disposition() -> bool:
-    """Whether a download can be forced to `attachment` by this backend."""
     return backend().supports_disposition
 
 
@@ -242,6 +237,8 @@ def savings() -> tuple[int, int]:
     stored, _count = index_db.usage()
     return stored, index_db.logical_usage()
 
+def open_blob(meta: dict, first: int | None = None, last: int | None = None):
+    return backend().fetch_stream(meta["sha256"], first, last)
 
 
 def download_url(meta: dict, content_type: str, inline: bool) -> str | None:
@@ -307,3 +304,78 @@ def sweep_orphans(dry_run: bool = True) -> list[str]:
         for d in orphans:
             backend().delete(d)
     return orphans
+
+def _finalise(digest: str, enc: str, stored_bytes: int, fresh: bool,
+              name: str, written: int, ttl_key: str, ip: str) -> dict:
+    index_db.put_blob(digest, enc, stored_bytes)
+    if not fresh:
+        existing = index_db.get_blob(digest)
+        if existing:
+            enc, stored_bytes = existing["enc"], existing["stored"]
+
+    meta = {
+        "id": new_id(),
+        "name": name,
+        "size": written,
+        "sha256": digest,
+        "created": time.time(),
+        "expires": time.time() + TTL_CHOICES.get(ttl_key, TTL_CHOICES[DEFAULT_TTL]),
+        "ttlKey": ttl_key if ttl_key in TTL_CHOICES else DEFAULT_TTL,
+        "deleteToken": secrets.token_urlsafe(24),
+        "downloads": 0,
+        "scriptable": os.path.splitext(name)[1].lower() in SCRIPTABLE,
+    }
+    index_db.add(meta)
+    note_upload(ip, written)
+    meta["enc"] = enc
+    meta["stored"] = stored_bytes
+    return meta
+
+
+def save_file(path: str, filename: str, ttl_key: str, ip: str) -> dict:
+    init()
+    name = clean_name(filename)
+    written = os.path.getsize(path)
+    if written == 0:
+        raise TooLarge("Empty upload.")
+    if written > MAX_FILE_BYTES:
+        gb = MAX_FILE_BYTES / (1024 ** 3)
+        raise TooLarge(f"Files are capped at {gb:.0f} GB.")
+
+    total, count = usage()
+    if count >= MAX_FILES:
+        raise OutOfSpace("The server is holding its maximum number of files.")
+    if total + written > MAX_TOTAL_BYTES:
+        raise OutOfSpace("The server is out of storage.")
+
+    attempt = (compression.Attempt(path + ".gz")
+               if compression.worth_trying(name) and backend().supports_encoding
+               else None)
+    sha = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 256)
+                if not chunk:
+                    break
+                sha.update(chunk)
+                if attempt:
+                    attempt.feed(chunk)
+        digest = sha.hexdigest()
+        packed = attempt.finish() if attempt else None
+
+        if compression.accept(written, packed):
+            enc, stored_bytes = "gzip", packed
+            fresh = backend().commit(digest, attempt.path, enc)
+            os.remove(path)
+        else:
+            if attempt:
+                attempt.abandon()
+            enc, stored_bytes = "", written
+            fresh = backend().commit(digest, path)
+        attempt = None
+    finally:
+        if attempt:
+            attempt.abandon()
+
+    return _finalise(digest, enc, stored_bytes, fresh, name, written, ttl_key, ip)
