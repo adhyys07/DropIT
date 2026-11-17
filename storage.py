@@ -125,8 +125,11 @@ def save_stream(stream, filename: str, ttl_key: str, ip: str,
     name = clean_name(filename)
     token = secrets.token_hex(8)
     tmp = os.path.join(TEMP_DIR, f"incoming-{token}")
+    # A backend that cannot send Content-Encoding would serve the gzip bytes
+    # as if they were the file, so such backends store everything verbatim.
     attempt = (compression.Attempt(os.path.join(TEMP_DIR, f"incoming-{token}.gz"))
-               if compression.worth_trying(name) else None)
+               if compression.worth_trying(name) and backend().supports_encoding
+               else None)
 
     sha = hashlib.sha256()
     written = 0
@@ -218,6 +221,22 @@ def load(fid: str) -> dict | None:
 
 def blob_for(meta: dict) -> str | None:
     return backend().local_path(meta["sha256"])
+
+def remote_quota() -> dict | None:
+    """Backend-reported storage limits, when the backend has any."""
+    b = backend()
+    return b.quota() if hasattr(b, "quota") else None
+
+
+def enforces_expiry() -> bool:
+    """Whether a TTL on this backend is a guarantee or best effort."""
+    return backend().enforces_expiry
+
+
+def supports_disposition() -> bool:
+    """Whether a download can be forced to `attachment` by this backend."""
+    return backend().supports_disposition
+
 
 def savings() -> tuple[int, int]:
     stored, _count = index_db.usage()

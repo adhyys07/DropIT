@@ -28,9 +28,11 @@ CREATE INDEX IF NOT EXISTS idx_files_expires ON files(expires);
 CREATE INDEX IF NOT EXISTS idx_files_sha     ON files(sha256);
 
 CREATE TABLE IF NOT EXISTS blobs (
-    sha256 TEXT PRIMARY KEY,
-    enc    TEXT    NOT NULL DEFAULT '',
-    stored INTEGER NOT NULL
+    sha256     TEXT PRIMARY KEY,
+    enc        TEXT    NOT NULL DEFAULT '',
+    stored     INTEGER NOT NULL,
+    remote_id  TEXT    NOT NULL DEFAULT '',
+    remote_url TEXT    NOT NULL DEFAULT ''
 );
 """
 
@@ -44,6 +46,11 @@ def _conn() -> sqlite3.Connection:
         c.execute("PRAGMA journal_mode=WAL")
         c.execute("PRAGMA synchronous=NORMAL")
         c.executescript(SCHEMA)
+        have = {r["name"] for r in c.execute("PRAGMA table_info(blobs)")}
+        for col in ("remote_id", "remote_url"):
+            if col not in have:
+                c.execute("ALTER TABLE blobs ADD COLUMN "
+                          + col + " TEXT NOT NULL DEFAULT ''")
         c.execute(
             "INSERT OR IGNORE INTO blobs (sha256, enc, stored) "
             "SELECT DISTINCT sha256, '', size FROM files"
@@ -104,7 +111,9 @@ def refcount(digest: str) -> int:
 
 def put_blob(digest: str, enc: str, stored: int) -> None:
     _conn().execute(
-        "INSERT OR IGNORE INTO blobs (sha256, enc, stored) VALUES (?,?,?)",
+        "INSERT INTO blobs (sha256, enc, stored) VALUES (?,?,?) "
+        "ON CONFLICT(sha256) DO UPDATE SET enc = excluded.enc, "
+        "stored = excluded.stored WHERE blobs.stored = 0",
         (digest, enc or "", stored),
     )
 
@@ -116,6 +125,29 @@ def get_blob(digest: str) -> dict | None:
 
 def drop_blob(digest: str) -> None:
     _conn().execute("DELETE FROM blobs WHERE sha256 = ?", (digest,))
+
+
+def set_remote(digest: str, remote_id: str, url: str) -> None:
+    _conn().execute(
+        "INSERT INTO blobs (sha256, enc, stored, remote_id, remote_url) "
+        "VALUES (?, '', 0, ?, ?) "
+        "ON CONFLICT(sha256) DO UPDATE SET remote_id = excluded.remote_id, "
+        "remote_url = excluded.remote_url",
+        (digest, remote_id, url),
+    )
+
+
+def get_remote(digest: str) -> dict | None:
+    r = _conn().execute(
+        "SELECT remote_id, remote_url FROM blobs "
+        "WHERE sha256 = ? AND remote_id != ''", (digest,)).fetchone()
+    return {"id": r["remote_id"], "url": r["remote_url"]} if r else None
+
+
+def clear_remote(digest: str) -> None:
+    _conn().execute(
+        "UPDATE blobs SET remote_id = '', remote_url = '' WHERE sha256 = ?",
+        (digest,))
 
 
 def usage() -> tuple[int, int]:

@@ -1,17 +1,40 @@
+import http.client
+import json
 import os
+import secrets
 import shutil
+import ssl
+
+import index_db
 
 BACKEND = os.environ.get("STORAGE_BACKEND", "local").lower()
 
+# --- S3 / R2 / B2 / MinIO -------------------------------------------------
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
-S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "")          # R2/B2/MinIO; blank = AWS
+S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "")     # blank means real AWS
 S3_REGION = os.environ.get("S3_REGION", "auto")
 S3_PREFIX = os.environ.get("S3_PREFIX", "blobs/")
-S3_URL_TTL = int(os.environ.get("S3_URL_TTL", 900))      
+S3_URL_TTL = int(os.environ.get("S3_URL_TTL", 900))  # presigned link lifetime
 
+# --- Hack Club CDN --------------------------------------------------------
+CDN_TOKEN = os.environ.get("CDN_TOKEN", "")
+CDN_HOST = os.environ.get("CDN_HOST", "cdn.hackclub.com")
+CRLF = chr(13) + chr(10)
 
 class Backend:
     name = "base"
+
+    # False when the backend cannot serve a stored gzip blob correctly,
+    # which forces uploads to be committed verbatim.
+    supports_encoding = True
+
+    # False when the backend serves files with its own headers, so
+    # Content-Disposition cannot be forced to attachment.
+    supports_disposition = True
+
+    # False when deleting a file does not reliably revoke access to it, so
+    # a TTL is best-effort rather than a guarantee.
+    enforces_expiry = True
 
     def exists(self, digest: str) -> bool:
         raise NotImplementedError
@@ -32,7 +55,6 @@ class Backend:
 
     def list_digests(self) -> set[str]:
         raise NotImplementedError
-
 
 class LocalBackend(Backend):
     name = "local"
@@ -170,7 +192,197 @@ class S3Backend(Backend):
         return out
 
 
+class HackClubBackend(Backend):
+    """Hack Club CDN (api/v4) as blob storage.
+
+    Three differences from a bucket shape this:
+
+      * No listing endpoint, so orphans cannot be detected.
+      * No way to override the response Content-Disposition or
+        Content-Encoding, so files are served however the CDN decides and
+        must be stored verbatim.
+      * URLs are permanent and public until explicitly deleted, so the
+        expiry reaper is the only thing between an expired file and a link
+        that still works.
+
+    The CDN addresses files by its own upload id rather than by our digest,
+    so that id is kept on the blob row and is what delete() needs.
+    """
+
+    name = "hackclub"
+    supports_encoding = False
+    supports_disposition = False
+
+    # Measured, not assumed: files are served with
+    # `Cache-Control: public, max-age=2592000`, and after a successful
+    # DELETE the Cloudflare edge keeps serving CF-Cache-Status: HIT. A file
+    # that was downloaded once stays reachable for up to 30 days past its
+    # expiry, and there is no purge API available to us.
+    enforces_expiry = False
+
+    def __init__(self, token: str = "", host: str = "", conn_factory=None):
+        self.token = token or CDN_TOKEN
+        self.host = host or CDN_HOST
+        self._conn_factory = conn_factory          # injected for tests
+        if not self.token:
+            raise RuntimeError(
+                "STORAGE_BACKEND=hackclub needs CDN_TOKEN. Create an API key "
+                "at https://cdn.hackclub.com after signing in."
+            )
+
+    def _connect(self):
+        if self._conn_factory is not None:
+            return self._conn_factory()
+        return http.client.HTTPSConnection(
+            self.host, timeout=600, context=ssl.create_default_context())
+
+    def _request(self, method, path, body=None, stream_path="", stream_len=0,
+                 boundary=""):
+        """One HTTPS call. A file is streamed from disk, never buffered."""
+        conn = self._connect()
+        try:
+            conn.putrequest(method, path, skip_accept_encoding=True)
+            conn.putheader("Authorization", "Bearer " + self.token)
+            if stream_path:
+                conn.putheader("Content-Type",
+                               "multipart/form-data; boundary=" + boundary)
+                conn.putheader("Content-Length", str(stream_len))
+                conn.endheaders()
+                with open(stream_path, "rb") as f:
+                    while True:
+                        chunk = f.read(1024 * 256)
+                        if not chunk:
+                            break
+                        conn.send(chunk)
+            elif body is not None:
+                raw = json.dumps(body).encode()
+                conn.putheader("Content-Type", "application/json")
+                conn.putheader("Content-Length", str(len(raw)))
+                conn.endheaders()
+                conn.send(raw)
+            else:
+                conn.endheaders()
+            resp = conn.getresponse()
+            return resp.status, resp.read()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def exists(self, digest: str) -> bool:
+        # There is no HEAD-by-digest, so our own record is the answer.
+        return bool(index_db.get_remote(digest))
+
+    def _envelope(self, digest: str, boundary: str) -> tuple[bytes, bytes]:
+        head = (
+            "--" + boundary + CRLF
+            + 'Content-Disposition: form-data; name="file"; filename="'
+            + digest[:16] + '.bin"' + CRLF
+            + "Content-Type: application/octet-stream" + CRLF + CRLF
+        ).encode()
+        tail = (CRLF + "--" + boundary + "--" + CRLF).encode()
+        return head, tail
+
+    def commit(self, digest: str, temp_path: str, enc: str = "") -> bool:
+        if enc:
+            raise RuntimeError(
+                "The Hack Club CDN cannot serve a gzip-encoded blob; "
+                "uploads must be committed verbatim."
+            )
+        staged = temp_path + ".mp"
+        try:
+            if self.exists(digest):
+                return False
+
+            boundary = "----dropit" + secrets.token_hex(16)
+            head, tail = self._envelope(digest, boundary)
+            size = os.path.getsize(temp_path)
+
+            # Assembling the envelope on disk keeps Content-Length exact and
+            # memory flat for a multi-gigabyte upload.
+            with open(staged, "wb") as out, open(temp_path, "rb") as src:
+                out.write(head)
+                shutil.copyfileobj(src, out, 1024 * 256)
+                out.write(tail)
+
+            status, payload = self._request(
+                "POST", "/api/v4/upload", stream_path=staged,
+                stream_len=len(head) + size + len(tail), boundary=boundary)
+
+            if status not in (200, 201):
+                raise RuntimeError(
+                    "CDN upload failed (" + str(status) + "): "
+                    + payload[:300].decode("utf-8", "replace"))
+            info = json.loads(payload)
+            if not info.get("id") or not info.get("url"):
+                raise RuntimeError(
+                    "CDN upload returned no id or url: "
+                    + payload[:200].decode("utf-8", "replace"))
+            index_db.set_remote(digest, info["id"], info["url"])
+            return True
+        finally:
+            for path in (staged, temp_path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def delete(self, digest: str) -> None:
+        remote = index_db.get_remote(digest)
+        if not remote:
+            return
+        try:
+            status, payload = self._request(
+                "DELETE", "/api/v4/upload/" + remote["id"])
+            if status not in (200, 202, 204, 404):
+                # Logged on purpose: the record is dropped either way, so a
+                # silent failure here leaks a file nothing will retry.
+                print("[cdn] delete of " + remote["id"] + " failed ("
+                      + str(status) + "): "
+                      + payload[:200].decode("utf-8", "replace"), flush=True)
+        except Exception as err:
+            print("[cdn] delete of " + remote["id"] + " errored: "
+                  + str(err), flush=True)
+        # The record goes either way: keeping it would make the blob
+        # undeletable, and the CDN charges the quota regardless.
+        index_db.clear_remote(digest)
+
+    def local_path(self, digest: str) -> str | None:
+        return None
+
+    def presigned_url(self, digest: str, filename: str,
+                      content_type: str, inline: bool) -> str | None:
+        """The CDN's permanent URL.
+
+        Note what this cannot do: the CDN decides the response content type
+        and disposition, so filename, content_type and inline are ignored
+        and a download is not forced. See supports_disposition.
+        """
+        remote = index_db.get_remote(digest)
+        return remote["url"] if remote else None
+
+    def list_digests(self) -> set[str]:
+        """Unsupported: api/v4 has no listing endpoint.
+
+        Empty is the safe answer. sweep_orphans() computes stored minus
+        known, so an empty set finds nothing rather than proposing to
+        delete every blob.
+        """
+        return set()
+
+    def quota(self) -> dict | None:
+        """Key owner and storage ceiling, straight from the CDN."""
+        try:
+            status, payload = self._request("GET", "/api/v4/me")
+            return json.loads(payload) if status == 200 else None
+        except Exception:
+            return None
+
+
 def make(blob_dir: str) -> Backend:
     if BACKEND == "s3":
         return S3Backend(S3_BUCKET, S3_ENDPOINT, S3_REGION, S3_PREFIX)
+    if BACKEND in ("hackclub", "cdn"):
+        return HackClubBackend()
     return LocalBackend(blob_dir)

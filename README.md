@@ -105,13 +105,17 @@ pip install -r requirements-dev.txt
 bash tests/run.sh
 ```
 
-Six suites: static checks, the signalling protocol against a live server, the
+Seven suites: static checks, the signalling protocol against a live server, the
 data path pushing real bytes through both engines (corruption, reordering,
 duplicate frames, pause, cancel, resume), hosted mode (upload, download, XSS
 hardening, quotas, dedup, deletion), the storage backends plus the SQLite index
 (key layout, presigned-URL hardening, orphan sweeps, reference counting), and
 storage compression (skip rules, abandoned attempts, dedup encoding, and the
-gzip and identity download paths).
+gzip and identity download paths), and the Hack Club CDN backend (multipart
+envelope, upload-id tracking, refused gzip commits, capability flags).
+
+The CDN suite drives a fake HTTPS connection, so it needs no API key and
+spends no quota.
 
 The backend suite drives a fake S3 client, so it runs without `boto3` and
 without a bucket. It proves our logic, not Amazon's.
@@ -190,72 +194,49 @@ to make them marginally *larger* — so those extensions are skipped outright,
 and anything else is abandoned mid-stream if its first few megabytes are not
 shrinking. Text, logs, CSV, JSON and SQL dumps are where the 5-10x lives.
 
-Two consequences worth knowing:
+### Hack Club CDN
 
-* **Peak temp space is raw + compressed.** A compressible 10 GB upload needs
-  roughly 11.5 GB free until the raw copy is dropped. Keep `UPLOAD_TEMP_DIR`
-  and `UPLOAD_DIR` on the same filesystem, or the commit becomes a full copy
-  instead of a rename.
-* **Range requests on a compressed blob are answered from the inflated
-  bytes**, so resume and seeking still work and offsets mean what the client
-  expects. The cost is that resuming near the end of a large file inflates up
-  to that offset first. A whole-file download with no `Range` header is still
-  handed over compressed and costs the server nothing.
-
-Two things to know before you expose this publicly:
-
-**Uploads are served hardened, not trusted.** Every hosted file goes out as
-`Content-Disposition: attachment` with `default-src 'none'; sandbox` and
-`nosniff`, so an uploaded `.html` or `.svg` cannot run on your origin. Safe
-image, audio and video types can be previewed with `?inline=1`; scriptable
-types never can. For belt and braces, serve `/f/` from a separate domain.
-
-**Nothing scans content.** Run a public instance and you will eventually host
-something you don't want to. Add a scanner or an abuse-report process, or leave
-`HOSTING_ENABLED=0`.
-
-### Bucket Storage (S3, R2, B2, MinIO)
-
-**On Render, Fly, Heroku and most containers the local disk is ephemeral** — it
-is wiped on every deploy, restart and crash. Hosted mode on local disk will
-quietly lose every uploaded file each time you push, handing your users links
-that 404 an hour later. If you deploy anywhere like that, use a bucket.
+An alternative to a bucket, if you have a Hack Club account:
 
 ```bash
-pip install boto3
-export STORAGE_BACKEND=s3
-export S3_BUCKET=dropit-files
-export S3_ENDPOINT='https://<account-id>.r2.cloudflarestorage.com'  # blank = AWS
-export S3_REGION=auto
-export S3_PREFIX=blobs/
-export S3_URL_TTL=900                                  # presigned link lifetime
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
+export STORAGE_BACKEND=hackclub
+export CDN_TOKEN='<api key from https://cdn.hackclub.com>'
 ```
 
-Downloads become a 302 to a presigned URL, so **file bytes never pass through
-the app server.** A single small instance can serve large files without
-noticing. The presign carries `ResponseContentDisposition` and
-`ResponseContentType` inside the signature, so the forced-download hardening
-survives the redirect — the bucket cannot be talked into serving an uploaded
-`.html` as rendered HTML.
+Sign in at `cdn.hackclub.com` with Hack Club OAuth and create an API key.
+`POST /api/v4/revoke` revokes the key in use, which is your kill switch if it
+leaks.
 
-**Keep the bucket private.** Presigned URLs are the only intended access path;
-a public bucket lets anyone enumerate your objects and keep reading them after
-the link is supposed to have expired.
+It is free and needs no bucket, but it gives up four things a bucket has, and
+the first is a security property rather than a convenience:
 
-**Pick the host on egress, not storage.** A file host is almost pure egress:
+* **Downloads are not forced.** The CDN serves files with its own headers, so
+  `Content-Disposition: attachment` cannot be applied. An uploaded `.html` or
+  `.svg` would render on `cdn.hackclub.com`. DropIT therefore **refuses
+  scriptable uploads with a 415** on this backend rather than hosting
+  something it cannot serve safely.
+* **No compression.** There is no way to set `Content-Encoding`, so blobs are
+  stored verbatim and `COMPRESS_UPLOADS` is ignored.
+* **No orphan sweep.** api/v4 has no listing endpoint, so `sweep_orphans()`
+  always reports nothing. A blob leaked by a crash between upload and index
+  write has to be removed through the CDN dashboard.
+* **Expiry cannot be enforced.** This one is measured, not theoretical.
+  Files are served with `Cache-Control: public, max-age=2592000`, and after
+  a successful `DELETE` the Cloudflare edge keeps answering
+  `CF-Cache-Status: HIT`. **A file that was downloaded even once stays
+  publicly readable for up to 30 days past its expiry**, and there is no
+  purge API available to us. `/api/hosting` reports this as
+  `enforcesExpiry: false`.
 
-| | Storage /GB·mo | Egress /GB | 100 GB served |
-|---|---|---|---|
-| **Cloudflare R2** | $0.015 | **$0** | **~$0.15** |
-| Backblaze B2 | $0.006 | free to 3× stored | ~$1 |
-| AWS S3 | $0.023 | $0.09 | ~$9.20 |
+  So on this backend a TTL means "DropIT stops advertising the link", not
+  "the file becomes unreachable". If you need expiry to actually expire,
+  use a bucket: an R2 presigned URL stops working when the signature does.
 
-Uploads still need local temp space equal to the file size: the stream is
-hashed to `UPLOAD_TEMP_DIR` before it can be committed, because the SHA-256 is
-the storage key. On a container with a small `/tmp`, point that somewhere
-roomy.
+The ceiling is your API key's quota tier (`unverified`, `verified`,
+`functionally_unlimited`), not `MAX_TOTAL_BYTES`; `/api/hosting` reports it as
+`remoteQuota`. And it is a shared nonprofit resource under *your* key — fine
+for your own project's files, worth thinking hard about for a public uploader
+that anyone can post to.
 
 #### Expiry, in two layers
 

@@ -3,6 +3,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# The suites exercise the local path and must never touch a real storage
+# backend, even when .env points at one. load_dotenv does not override
+# variables that are already set, so these win.
+export STORAGE_BACKEND=local
+unset CDN_TOKEN
+
 PORT="${PORT:-5099}"
 LOG="$(mktemp)"
 export DROPIT_URL="http://127.0.0.1:${PORT}"
@@ -15,6 +21,10 @@ echo
 echo "=== storage backends ==="
 python tests/test_backends.py
 backend_rc=$?
+
+echo "=== hack club cdn ==="
+python tests/test_cdn.py
+cdn_rc=$?
 
 PORT="$PORT" python server.py > "$LOG" 2>&1 &
 SERVER_PID=$!
@@ -61,9 +71,10 @@ printf '  data path  %s\n' "$([ $engine_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  hosting    %s\n' "$([ $hosting_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  backends   %s\n' "$([ $backend_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  compress   %s\n' "$([ $compress_rc -eq 0 ] && echo PASS || echo FAIL)"
+printf '  cdn        %s\n' "$([ $cdn_rc -eq 0 ] && echo PASS || echo FAIL)"
 echo "======================================"
 
-if [ $((static_rc + proto_rc + engine_rc + hosting_rc + backend_rc + compress_rc)) -ne 0 ]; then
+if [ $((static_rc + proto_rc + engine_rc + hosting_rc + backend_rc + compress_rc + cdn_rc)) -ne 0 ]; then
   echo
   echo "--- server log ---"
   cat "$LOG"

@@ -9,7 +9,14 @@ import time
 import base64
 from urllib.parse import unquote
 import mimetypes
-import storage
+
+# Load .env before importing storage. storage imports backends, which reads
+# its configuration at import time, so loading any later is too late.
+from dotenv import load_dotenv
+
+load_dotenv()
+
+import storage  # noqa: E402
 
 from flask import Flask, redirect, request, send_from_directory, stream_with_context, send_file, jsonify, Response, abort
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -281,12 +288,24 @@ def api_upload():
     else:
         stream, filename = request.stream, filename or "file"
 
+    if (not storage.supports_disposition()
+            and os.path.splitext(storage.clean_name(filename))[1].lower()
+            in storage.SCRIPTABLE):
+        return jsonify({"error": "This server cannot host scriptable file types "
+                                 "safely. Use direct send instead."}), 415
+
     try:
         meta = storage.save_stream(stream, filename, ttl_key, ip, declared or None)
     except storage.TooLarge as err:
         return jsonify({"error": str(err)}), 413
     except storage.OutOfSpace as err:
         return jsonify({"error": str(err)}), 507
+    except (RuntimeError, OSError) as err:
+        # Remote storage refused or could not be reached. That is not the
+        # client's fault and not a bug here, so say so rather than 500.
+        print(f"[upload] storage backend failed: {err}", flush=True)
+        return jsonify({"error": "Storage is unavailable right now. "
+                                 "Try again, or use direct send."}), 502
     except Exception as err:
         print(f"[upload] failed: {err}", flush=True)
         return jsonify({"error": "Upload failed."}), 500
@@ -306,11 +325,6 @@ def api_upload():
 
 
 def parse_byte_range(header: str | None, size: int):
-    """Parse a single-range `Range` header against a known length.
-
-    Returns (first, last) inclusive, None when no range was asked for, or
-    False when the request cannot be satisfied (caller answers 416).
-    """
     if not header or not header.startswith("bytes="):
         return None
     spec = header[len("bytes="):].split(",")[0].strip()
@@ -345,6 +359,8 @@ def hosted_file(fid, name):
 
     signed = storage.download_url(meta, serve_type, inline)
     if signed:
+        if meta["scriptable"] and not storage.supports_disposition():
+            abort(409)
         storage.note_download(fid)
         resp = redirect(signed, code=302)
         resp.headers["X-DropIT-Hosted"] = "1"
@@ -444,7 +460,7 @@ def api_file_delete(fid):
 def api_hosting():
     total, count = storage.usage()
     stored, logical = storage.savings()
-    return jsonify({
+    out = {
         "enabled": HOSTING_ENABLED,
         "maxFileBytes": storage.MAX_FILE_BYTES,
         "ttlChoices": list(storage.TTL_CHOICES.keys()),
@@ -455,7 +471,19 @@ def api_hosting():
         "compressionRatio": round(stored / logical, 3) if logical else 1.0,
         "files": count,
         "backend": storage.backend_name(),
-    })
+        # False means the backend serves files with its own headers, so the
+        # upload page should not promise a forced download.
+        "forcesDownload": storage.supports_disposition(),
+        "enforcesExpiry": storage.enforces_expiry(),
+    }
+    q = storage.remote_quota()
+    if q:
+        out["remoteQuota"] = {
+            "tier": q.get("quota_tier"),
+            "limitBytes": q.get("storage_limit"),
+        }
+    return jsonify(out)
+
 
 
 @app.route("/robots.txt")
