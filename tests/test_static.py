@@ -1,4 +1,3 @@
-"""Static check: every $('id') / getElementById('id') used in a page exists in it."""
 import pathlib
 import re
 import sys
@@ -19,11 +18,9 @@ for name in ["index", "sender", "reciever"]:
         print(f"  MISSING (referenced but not in markup): {missing}")
     else:
         print("  OK  every referenced id exists")
-    # ids used only by CSS/aria are fine; list them for eyeballing only
     if unused:
         print(f"  note: declared but not referenced in JS: {unused}")
 
-# also confirm every import path resolves on disk
 print("\n--- import paths ---")
 for name in ["index", "sender", "reciever"]:
     src = (ROOT / f"{name}.html").read_text(encoding="utf-8")
@@ -34,7 +31,6 @@ for name in ["index", "sender", "reciever"]:
             bad += 1
         print(f"  {'OK  ' if ok else 'MISS'} {name}.html -> {spec}")
 
-# and that stylesheet/script srcs exist locally where they are local
 print("\n--- local asset refs ---")
 for name in ["index", "sender", "reciever"]:
     src = (ROOT / f"{name}.html").read_text(encoding="utf-8")

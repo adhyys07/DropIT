@@ -1,2 +1,5 @@
 .claude
 src-tauri/icons
+uploads/
+__pycache__/
+.env

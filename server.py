@@ -1,4 +1,5 @@
 
+import gzip
 import hashlib
 import hmac
 import os
@@ -6,8 +7,11 @@ import secrets
 import threading
 import time
 import base64
+from urllib.parse import unquote
+import mimetypes
+import storage
 
-from flask import Flask, redirect, request, send_from_directory
+from flask import Flask, redirect, request, send_from_directory, stream_with_context, send_file, jsonify, Response, abort
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
 app = Flask(__name__, static_folder="static")
@@ -42,13 +46,24 @@ CSP = "; ".join([
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
-    "object-src 'self' blob:",          # the PDF <embed> preview
+    "object-src 'self' blob:",          
     "connect-src 'self' ws: wss:",
     "worker-src 'self' blob:",
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",
 ])
+
+INLINE_OK = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif",
+    "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav",
+    "text/plain",
+}
+
+storage.init()
+
+HOSTING_ENABLED = os.environ.get("HOSTING_ENABLED", "1").lower() in ("1", "true", "yes")
+
 
 rooms: dict[str, dict] = {}
 _lock = threading.RLock()
@@ -145,6 +160,14 @@ def reaper():
             for ip in [k for k, v in _join_log.items()
                        if not v or now - max(v) > JOIN_WINDOW]:
                 _join_log.pop(ip, None)
+            pass
+        if HOSTING_ENABLED:
+            try:
+                n = storage.reap()
+                if n:
+                    print(f"[reap] {n} hosted file(s) expired", flush=True)
+            except Exception as err:                     
+                print(f"[reap] storage error: {err}", flush=True)
 
 def turn_credentials(label: str = "dropit") -> tuple[str, str]:
     expiry = int(time.time()) + ICE_TTL
@@ -166,11 +189,21 @@ def require_https():
 
 @app.after_request
 def security_headers(resp):
+    if resp.headers.pop("X-DropIT-Hosted", None):
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'none'; sandbox; frame-ancestors 'none'"
+        )
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
+        resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+        resp.headers["X-Frame-Options"] = "DENY"
+        return resp
+
     resp.headers.setdefault("Content-Security-Policy", CSP)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("X-Frame-Options", "DENY")
-    # camera must stay allowed or the QR scanner breaks.
     resp.headers.setdefault(
         "Permissions-Policy",
         "camera=(self), microphone=(), geolocation=(), interest-cohort=()",
@@ -218,6 +251,221 @@ def static_files(path):
 def healthz():
     return {"ok": True, "rooms": len(rooms)}
 
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    if not HOSTING_ENABLED:
+        return jsonify({"error": "File hosting is disabled on this server."}), 403
+
+    ip = client_ip()
+    declared = request.content_length or 0
+    if declared and declared > storage.MAX_FILE_BYTES:
+        return jsonify({"error": "File too large.",
+                        "maxBytes": storage.MAX_FILE_BYTES}), 413
+
+    reason = storage.rate_limited(ip, declared)
+    if reason:
+        return jsonify({"error": reason}), 429
+
+    ttl_key = (request.args.get("ttl") or storage.DEFAULT_TTL).lower()
+    raw_name = request.headers.get("X-File-Name", "")
+    try:
+        filename = unquote(raw_name)
+    except Exception:
+        filename = raw_name
+    if request.mimetype in ("multipart/form-data", "application/x-www-form-urlencoded"):
+        fs = request.files.get("file")
+        if fs is None:
+            return jsonify({"error": "Send the file as the raw request body, or as "
+                                     "a multipart field named 'file'."}), 400
+        stream, filename = fs.stream, filename or fs.filename
+    else:
+        stream, filename = request.stream, filename or "file"
+
+    try:
+        meta = storage.save_stream(stream, filename, ttl_key, ip, declared or None)
+    except storage.TooLarge as err:
+        return jsonify({"error": str(err)}), 413
+    except storage.OutOfSpace as err:
+        return jsonify({"error": str(err)}), 507
+    except Exception as err:
+        print(f"[upload] failed: {err}", flush=True)
+        return jsonify({"error": "Upload failed."}), 500
+
+    base = request.url_root.rstrip("/")
+    return jsonify({
+        "id": meta["id"],
+        "name": meta["name"],
+        "size": meta["size"],
+        "sha256": meta["sha256"],
+        "url": f"{base}/f/{meta['id']}/{meta['name']}",
+        "deleteUrl": f"{base}/api/file/{meta['id']}?token={meta['deleteToken']}",
+        "deleteToken": meta["deleteToken"],
+        "expiresAt": int(meta["expires"] * 1000),
+        "ttl": meta["ttlKey"],
+    })
+
+
+def parse_byte_range(header: str | None, size: int):
+    """Parse a single-range `Range` header against a known length.
+
+    Returns (first, last) inclusive, None when no range was asked for, or
+    False when the request cannot be satisfied (caller answers 416).
+    """
+    if not header or not header.startswith("bytes="):
+        return None
+    spec = header[len("bytes="):].split(",")[0].strip()
+    try:
+        if spec.startswith("-"):
+            tail = int(spec[1:])
+            if tail <= 0:
+                return False
+            first, last = max(0, size - tail), size - 1
+        else:
+            head, _sep, rest = spec.partition("-")
+            first = int(head)
+            last = int(rest) if rest else size - 1
+    except ValueError:
+        return False
+    if first > last or first >= size or first < 0:
+        return False
+    return first, min(last, size - 1)
+
+
+@app.route("/f/<fid>", defaults={"name": None})
+@app.route("/f/<fid>/<path:name>")
+def hosted_file(fid, name):
+    meta = storage.load(fid)
+    if not meta:
+        abort(404)
+
+    guessed = mimetypes.guess_type(meta["name"])[0] or "application/octet-stream"
+    wants_inline = request.args.get("inline") == "1"
+    inline = wants_inline and guessed in INLINE_OK and not meta["scriptable"]
+    serve_type = guessed if inline else "application/octet-stream"
+
+    signed = storage.download_url(meta, serve_type, inline)
+    if signed:
+        storage.note_download(fid)
+        resp = redirect(signed, code=302)
+        resp.headers["X-DropIT-Hosted"] = "1"
+        resp.headers["Cache-Control"] = "private, no-store"
+        return resp
+
+    path = storage.blob_for(meta)
+    if not path or not os.path.exists(path):
+        abort(404)
+
+    storage.note_download(fid)
+    disposition = f'{"inline" if inline else "attachment"}; filename="{meta["name"]}"'
+    serve_mime = guessed if inline else "application/octet-stream"
+
+    if meta.get("enc") == "gzip":
+        size = meta["size"]
+        rng = parse_byte_range(request.headers.get("Range"), size)
+
+        if rng is False:
+            resp = Response(status=416)
+            resp.headers["Content-Range"] = f"bytes */{size}"
+
+        elif rng:
+            # Ranges are always answered from the inflated representation, so
+            # offsets mean what the client thinks they mean. Resuming near the
+            # end of a large file costs a full inflate to reach the offset,
+            # which is still far better than restarting the download.
+            first, last = rng
+
+            def pump_range(blob_path=path, first=first, last=last):
+                with gzip.open(blob_path, "rb") as f:
+                    f.seek(first)
+                    left = last - first + 1
+                    while left > 0:
+                        chunk = f.read(min(256 * 1024, left))
+                        if not chunk:
+                            break
+                        left -= len(chunk)
+                        yield chunk
+
+            resp = Response(stream_with_context(pump_range()), status=206,
+                            mimetype=serve_mime)
+            resp.headers["Content-Range"] = f"bytes {first}-{last}/{size}"
+            resp.headers["Content-Length"] = str(last - first + 1)
+
+        elif "gzip" in request.headers.get("Accept-Encoding", "").lower():
+            # Hand over the stored bytes untouched and let the browser inflate
+            # them, so a whole-file download costs us no CPU.
+            resp = send_file(path, mimetype=serve_mime,
+                             conditional=False, max_age=0)
+            resp.headers["Content-Encoding"] = "gzip"
+            resp.headers["Content-Length"] = str(meta["stored"])
+            resp.headers["X-DropIT-Uncompressed-Length"] = str(size)
+
+        else:
+            # A client that will not take gzip gets it inflated on the way
+            # out, streamed so a huge file never becomes a huge buffer.
+            def pump(blob_path=path):
+                with gzip.open(blob_path, "rb") as f:
+                    while True:
+                        chunk = f.read(256 * 1024)
+                        if not chunk:
+                            break
+                        yield chunk
+
+            resp = Response(stream_with_context(pump()), mimetype=serve_mime)
+            resp.headers["Content-Length"] = str(size)
+
+        resp.headers["Accept-Ranges"] = "bytes"
+        resp.headers["Vary"] = "Accept-Encoding"
+    else:
+        resp = send_file(path, mimetype=serve_mime, as_attachment=not inline,
+                         download_name=meta["name"], conditional=True, max_age=0)
+
+    resp.headers["X-DropIT-Hosted"] = "1"
+    resp.headers["Content-Disposition"] = disposition
+    return resp
+
+
+@app.route("/api/file/<fid>", methods=["GET"])
+def api_file_meta(fid):
+    meta = storage.load(fid)
+    if not meta:
+        return jsonify({"error": "Not found or expired."}), 404
+    return jsonify({
+        "id": meta["id"], "name": meta["name"], "size": meta["size"],
+        "sha256": meta["sha256"], "downloads": meta.get("downloads", 0),
+        "expiresAt": int(meta["expires"] * 1000),
+    })
+
+
+@app.route("/api/file/<fid>", methods=["DELETE"])
+def api_file_delete(fid):
+    token = request.args.get("token") or request.headers.get("X-Delete-Token", "")
+    if storage.delete(fid, token):
+        return jsonify({"deleted": True})
+    return jsonify({"error": "Wrong delete token, or the file is already gone."}), 403
+
+
+@app.route("/api/hosting")
+def api_hosting():
+    total, count = storage.usage()
+    stored, logical = storage.savings()
+    return jsonify({
+        "enabled": HOSTING_ENABLED,
+        "maxFileBytes": storage.MAX_FILE_BYTES,
+        "ttlChoices": list(storage.TTL_CHOICES.keys()),
+        "defaultTtl": storage.DEFAULT_TTL,
+        "usedBytes": total,
+        "totalBytes": storage.MAX_TOTAL_BYTES,
+        "logicalBytes": logical,
+        "compressionRatio": round(stored / logical, 3) if logical else 1.0,
+        "files": count,
+        "backend": storage.backend_name(),
+    })
+
+
+@app.route("/robots.txt")
+def robots():
+    return Response("User-agent: *\nDisallow: /f/\n", mimetype="text/plain")
+
 
 @socketio.on("connect")
 def on_connect():
@@ -237,7 +485,7 @@ def on_create_room(data):
         max_recv = 1
 
     try:
-        max_uses = max(0, int(data.get("maxUses") or 0))     # 0 = unlimited
+        max_uses = max(0, int(data.get("maxUses") or 0))    
     except (TypeError, ValueError):
         max_uses = 0
 
@@ -348,8 +596,6 @@ def on_join_room(data):
             "name": (data.get("deviceName") or "Receiver")[:40],
             "approved": not room["require_approval"],
         }
-        # A reconnect from the same socket is not a new use, or a
-        # "burn after one use" key would die on the first dropped connection.
         if not rejoin:
             room["uses"] += 1
         exhausted = bool(room["max_uses"]) and room["uses"] >= room["max_uses"]
@@ -405,9 +651,9 @@ def on_signal(data):
         return emit("error", {"code": "not-approved", "message": "Not approved"})
 
     if request.sid == room["sender_sid"]:
-        target = rec["sid"]                    # sender -> that one receiver
+        target = rec["sid"]                    
     elif request.sid == rec["sid"]:
-        target = room["sender_sid"]            # receiver -> sender
+        target = room["sender_sid"]            
     else:
         return
 

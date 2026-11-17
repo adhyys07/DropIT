@@ -447,3 +447,18 @@ dialog.preview pre{margin:0;white-space:pre-wrap;word-break:break-word;
 /* ---------- SHARE LINKS -------------------------------------------------- */
 .share{display:flex;gap:var(--size-2);justify-content:center;margin:0 0 var(--size-3)}
 .share .btn{text-decoration:none;flex:1}
+
+/* ---------- HOSTED MODE (catbox-style upload) --------------------------- */
+.callout{display:block;padding:var(--size-3) var(--size-4);margin-bottom:var(--size-4);
+  background:var(--color-accent-soft);border:1px solid var(--color-accent);
+  border-radius:var(--radius-2);font-size:var(--text-2);color:var(--color-ink)}
+.callout strong{color:var(--color-accent)}
+.callout a{color:var(--color-accent);font-weight:600}
+.linkbox{width:100%;min-height:48px;padding:0 var(--size-3);
+  font:var(--text-2)/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--color-surface-sunken);color:var(--color-ink);
+  border:1px solid var(--color-border);border-radius:var(--radius-1);
+  text-align:center;text-overflow:ellipsis}
+.keycard code{font-size:var(--text-1);color:var(--color-ink-3);word-break:break-all;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.meterrow .btn-sm{margin-top:var(--size-2)}

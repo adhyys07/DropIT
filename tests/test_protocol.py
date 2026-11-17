@@ -1,4 +1,3 @@
-"""End-to-end test of the DropIT signalling protocol."""
 import os
 import time
 
@@ -145,7 +144,6 @@ arid = aj["receiverId"]
 note = wait_for(s3, "receiver-joined")
 check("joined notice approved False", note and note["approved"] is False, note)
 
-# relay must be refused before approval
 ar.events.clear()
 ar.emit("signal", {"code": acode, "receiverId": arid, "signal": {"a": 1}})
 err = wait_for(ar, "error")

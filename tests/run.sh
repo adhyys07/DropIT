@@ -11,6 +11,11 @@ echo "=== static checks ==="
 python tests/test_static.py
 static_rc=$?
 
+echo
+echo "=== storage backends ==="
+python tests/test_backends.py
+backend_rc=$?
+
 PORT="$PORT" python server.py > "$LOG" 2>&1 &
 SERVER_PID=$!
 cleanup() { kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
@@ -40,13 +45,25 @@ node tests/test_engines.mjs
 engine_rc=$?
 
 echo
+echo "=== hosted files ==="
+python tests/test_hosting.py
+hosting_rc=$?
+
+echo "=== compression ==="
+python tests/test_compression.py
+compress_rc=$?
+
+echo
 echo "======================================"
 printf '  static     %s\n' "$([ $static_rc -eq 0 ] && echo PASS || echo FAIL)"
 printf '  protocol   %s\n' "$([ $proto_rc  -eq 0 ] && echo PASS || echo FAIL)"
 printf '  data path  %s\n' "$([ $engine_rc -eq 0 ] && echo PASS || echo FAIL)"
+printf '  hosting    %s\n' "$([ $hosting_rc -eq 0 ] && echo PASS || echo FAIL)"
+printf '  backends   %s\n' "$([ $backend_rc -eq 0 ] && echo PASS || echo FAIL)"
+printf '  compress   %s\n' "$([ $compress_rc -eq 0 ] && echo PASS || echo FAIL)"
 echo "======================================"
 
-if [ $((static_rc + proto_rc + engine_rc)) -ne 0 ]; then
+if [ $((static_rc + proto_rc + engine_rc + hosting_rc + backend_rc + compress_rc)) -ne 0 ]; then
   echo
   echo "--- server log ---"
   cat "$LOG"

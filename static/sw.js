@@ -72,7 +72,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
-  if (url.pathname.startsWith('/socket.io/')) return;   // never cache signalling
+  if (url.pathname.startsWith('/socket.io/')) return;
+  // Hosted uploads and API responses must never enter the app-shell cache.
+  if (url.pathname.startsWith('/f/')) return;
+  if (url.pathname.startsWith('/api/')) return;   // never cache signalling
   if (url.pathname === '/healthz') return;
 
   // Navigations: network first, so a deploy is picked up immediately.

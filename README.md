@@ -14,8 +14,26 @@
 3. The other person types the key, or scans it.
 4. The file transfers directly between the two devices.
 
-**Your files never touch our server.** It introduces the two browsers to each
-other, then gets out of the way.
+**In direct send, your files never touch our server.** It introduces the two
+browsers to each other, then gets out of the way.
+
+---
+
+## Two Modes
+
+| | Direct send | Upload a link |
+|---|---|---|
+| Where the file goes | Browser → browser | Stored on the server |
+| Both online at once | Required | No |
+| Size limit | None | 200 MB (configurable) |
+| Who can read it | Only you two | Anyone with the link |
+| Lifetime | The session | 1 hour to 7 days, then deleted |
+
+**Direct send** is the default and the private one. **Upload a link** is there
+for when the other person is asleep — it works like catbox: you get a URL, it
+expires, and you hold the only delete key.
+
+Pick direct send for anything you'd rather we couldn't read.
 
 ---
 ## Is It Actually Private?
@@ -60,12 +78,12 @@ and shows up in your phone's share sheet.
 
 ## 🛠 Tech Stack
 
-**Transport** — WebRTC data channels via [simple-peer](https://github.com/feross/simple-peer)
-**Signalling** — Python, Flask, Flask-SocketIO on eventlet
-**Frontend** — Vanilla JS ES modules. No framework, no build step.
-**Storage** — File System Access API → StreamSaver → IndexedDB → Blob, whichever the browser supports
-**Crypto** — WebCrypto for SHA-256 and safety words; PBKDF2 for room passwords
-**Desktop** — Tauri 2
+1)**Transport** : WebRTC data channels via [simple-peer](https://github.com/feross/simple-peer)<br>
+2)**Signalling**: Python, Flask, Flask-SocketIO on eventlet<br>
+3)**Frontend** : Vanilla JS ES modules. No framework, no build step.<br>
+4)**Storage** : File System Access API → StreamSaver → IndexedDB → Blob, whichever the browser supports<br>
+5)**Crypto** : WebCrypto for SHA-256 and safety words; PBKDF2 for room passwords<br>
+6)**Desktop** : Tauri 2<br>
 
 ---
 
@@ -87,9 +105,16 @@ pip install -r requirements-dev.txt
 bash tests/run.sh
 ```
 
-Three suites: static checks, the signalling protocol against a live server, and
-the data path pushing real bytes through both engines — corruption, reordering,
-duplicate frames, pause, cancel and resume.
+Six suites: static checks, the signalling protocol against a live server, the
+data path pushing real bytes through both engines (corruption, reordering,
+duplicate frames, pause, cancel, resume), hosted mode (upload, download, XSS
+hardening, quotas, dedup, deletion), the storage backends plus the SQLite index
+(key layout, presigned-URL hardening, orphan sweeps, reference counting), and
+storage compression (skip rules, abandoned attempts, dedup encoding, and the
+gzip and identity download paths).
+
+The backend suite drives a fake S3 client, so it runs without `boto3` and
+without a bucket. It proves our logic, not Amazon's.
 
 ---
 
@@ -122,6 +147,146 @@ address space — otherwise anyone with a credential can relay into your network
 
 With no TURN configured the UI tells users plainly, rather than spinning forever.
 
+### Hosted Mode Settings
+
+Upload-a-link stores real files, so give it a disk with room and keep the caps
+tight. It is on by default.
+
+```bash
+export UPLOAD_DIR='/var/lib/dropit/uploads'   # NOT inside static/
+export MAX_FILE_BYTES=10737418240             # 10 GB per file
+export MAX_TOTAL_BYTES=10737418240            # 10 GB held on disk
+export UPLOAD_MAX_FILES=30                    # per IP, per hour
+export UPLOAD_MAX_BYTES=10737418240           # per IP, per hour
+export HOSTING_ENABLED=0                      # turn the mode off entirely
+```
+
+`MAX_TOTAL_BYTES` is measured in bytes **actually on disk**, after
+deduplication and compression — so a 10 GB pool holds far more than 10 GB of
+text. `MAX_FILE_BYTES` is measured on the upload itself, because the raw bytes
+have to fit in `UPLOAD_TEMP_DIR` while being hashed.
+
+Note that `UPLOAD_MAX_BYTES` is checked against `Content-Length` *before* a
+byte is read, so leaving it below `MAX_FILE_BYTES` rejects every large upload
+with an hourly-limit message.
+
+#### Compression
+
+Uploads are stored gzipped when that genuinely saves space, and served with
+`Content-Encoding: gzip` so the **browser** inflates them. Downloads therefore
+cost no server CPU, and the user still receives the original file.
+
+```bash
+export COMPRESS_UPLOADS=1             # 0 disables it entirely
+export COMPRESS_LEVEL=6               # 1 is ~4x faster for ~15% less saving
+export COMPRESS_MIN_GAIN=0.10         # keep the gzip copy only if it saves 10%+
+export COMPRESS_PROBE_BYTES=4194304   # give up after 4 MB of no progress
+export COMPRESS_PROBE_RATIO=0.90
+```
+
+Most uploads are never compressed, by design. Video, photos, MP3s, PDFs and
+`.zip`-family archives are already compressed — gzip would spend minutes of CPU
+to make them marginally *larger* — so those extensions are skipped outright,
+and anything else is abandoned mid-stream if its first few megabytes are not
+shrinking. Text, logs, CSV, JSON and SQL dumps are where the 5-10x lives.
+
+Two consequences worth knowing:
+
+* **Peak temp space is raw + compressed.** A compressible 10 GB upload needs
+  roughly 11.5 GB free until the raw copy is dropped. Keep `UPLOAD_TEMP_DIR`
+  and `UPLOAD_DIR` on the same filesystem, or the commit becomes a full copy
+  instead of a rename.
+* **Range requests on a compressed blob are answered from the inflated
+  bytes**, so resume and seeking still work and offsets mean what the client
+  expects. The cost is that resuming near the end of a large file inflates up
+  to that offset first. A whole-file download with no `Range` header is still
+  handed over compressed and costs the server nothing.
+
+Two things to know before you expose this publicly:
+
+**Uploads are served hardened, not trusted.** Every hosted file goes out as
+`Content-Disposition: attachment` with `default-src 'none'; sandbox` and
+`nosniff`, so an uploaded `.html` or `.svg` cannot run on your origin. Safe
+image, audio and video types can be previewed with `?inline=1`; scriptable
+types never can. For belt and braces, serve `/f/` from a separate domain.
+
+**Nothing scans content.** Run a public instance and you will eventually host
+something you don't want to. Add a scanner or an abuse-report process, or leave
+`HOSTING_ENABLED=0`.
+
+### Bucket Storage (S3, R2, B2, MinIO)
+
+**On Render, Fly, Heroku and most containers the local disk is ephemeral** — it
+is wiped on every deploy, restart and crash. Hosted mode on local disk will
+quietly lose every uploaded file each time you push, handing your users links
+that 404 an hour later. If you deploy anywhere like that, use a bucket.
+
+```bash
+pip install boto3
+export STORAGE_BACKEND=s3
+export S3_BUCKET=dropit-files
+export S3_ENDPOINT='https://<account-id>.r2.cloudflarestorage.com'  # blank = AWS
+export S3_REGION=auto
+export S3_PREFIX=blobs/
+export S3_URL_TTL=900                                  # presigned link lifetime
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+```
+
+Downloads become a 302 to a presigned URL, so **file bytes never pass through
+the app server.** A single small instance can serve large files without
+noticing. The presign carries `ResponseContentDisposition` and
+`ResponseContentType` inside the signature, so the forced-download hardening
+survives the redirect — the bucket cannot be talked into serving an uploaded
+`.html` as rendered HTML.
+
+**Keep the bucket private.** Presigned URLs are the only intended access path;
+a public bucket lets anyone enumerate your objects and keep reading them after
+the link is supposed to have expired.
+
+**Pick the host on egress, not storage.** A file host is almost pure egress:
+
+| | Storage /GB·mo | Egress /GB | 100 GB served |
+|---|---|---|---|
+| **Cloudflare R2** | $0.015 | **$0** | **~$0.15** |
+| Backblaze B2 | $0.006 | free to 3× stored | ~$1 |
+| AWS S3 | $0.023 | $0.09 | ~$9.20 |
+
+Uploads still need local temp space equal to the file size: the stream is
+hashed to `UPLOAD_TEMP_DIR` before it can be committed, because the SHA-256 is
+the storage key. On a container with a small `/tmp`, point that somewhere
+roomy.
+
+#### Expiry, in two layers
+
+The reaper handles exact per-file TTLs. Add a lifecycle rule as a backstop so
+nothing leaks forever if the server is down when something expires:
+
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket dropit-files \
+  --lifecycle-configuration '{"Rules":[{
+    "ID":"backstop-delete","Status":"Enabled",
+    "Filter":{"Prefix":"blobs/"},
+    "Expiration":{"Days":8},
+    "AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}'
+```
+
+Eight days sits just past the longest TTL DropIT offers. The multipart rule
+matters more than it looks: abandoned multipart uploads do not appear in
+listings but you are still billed for them.
+
+For blobs orphaned by a process dying mid-upload:
+
+```bash
+python -c "import storage; print(storage.sweep_orphans(dry_run=True))"
+```
+
+Run it rarely. On a bucket it is a paid `LIST` over everything.
+
+> **Untested against a real bucket.** The S3 path has only ever run against a
+> fake client in the test suite. Expect to shake out a wrinkle on your first
+> live upload.
+
 ## Desktop App
 
 ```bash
@@ -139,32 +304,7 @@ under `bundle.externalBin`.
 
 ## For Developers
 
-The codebase is small and has no build step — open a file and read it.
-
-```
-server.py            Flask + Socket.IO. Rooms in memory, TTL-reaped. Never sees file data.
-static/js/
-  protocol.js        Message types, 9-byte chunk framing, chunk-size negotiation
-  send-engine.js     Streaming slice reader, ack window, pause/cancel, hashing, gzip
-  recv-engine.js     Ordered reassembly, four writer tiers, integrity verification
-  ice.js             TURN/STUN fetch, ICE diagnosis, connection quality
-  integrity.js       Streaming SHA-256 (Merkle root over per-chunk digests)
-  safety.js          Safety words from both DTLS fingerprints
-  compress.js        Per-chunk gzip via CompressionStream
-  idb-store.js       IndexedDB chunk persistence for resume-after-reload
-  reconnect.js       Socket and datachannel supervisors with backoff
-  preview.js         Image / video / audio / PDF / text previews
-  history.js         Local transfer log
-  extras.js          Device names, clipboard, notifications
-```
-
-### Good First Issues
-
-- A TURN relay is the single biggest reliability win — see the deploy section.
-- No browser-level E2E tests yet; Playwright would catch what the headless suites can't.
-- `eventlet` is ageing. Moving to `async_mode="gevent"` is a one-line change plus a dependency swap.
-- The chunk size is negotiated but never adapts to measured throughput.
-- No i18n.
+It does not require any setup, you can just run the python server and you are good to go
 
 ---
 <div align="center">
